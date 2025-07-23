@@ -1,0 +1,89 @@
+# Database and cached data
+projects.db
+projects.db-*
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+logs/
+*.log
+*.log.*
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific temporary files
+test_launch.py
+test_app.py
+debug_scanner.py
+check_db.py
+
+# Ollama model cache (if any)
+.ollama/
+ollama_cache/
+
+# Configuration files with sensitive data (optional)
+# config.json
+
+# Large model files or downloads
+*.model
+*.bin
+*.safetensors
+models/
+downloads/ 
