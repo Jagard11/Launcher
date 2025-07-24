@@ -73,13 +73,17 @@ test_launch.py
 test_app.py
 debug_scanner.py
 check_db.py
+test_qwen_launch.py
+
+# Accidentally created files (command output, etc.)
+=*
 
 # Ollama model cache (if any)
 .ollama/
 ollama_cache/
 
 # Configuration files with sensitive data (optional)
-# config.json
+config.json
 
 # Large model files or downloads
 *.model
