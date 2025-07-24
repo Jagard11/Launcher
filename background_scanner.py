@@ -68,6 +68,11 @@ class BackgroundScanner:
         self.update_queue.put(('dirty', None))
         logger.info("Triggered dirty project cleanup")
     
+    def trigger_cleanup_orphans(self):
+        """Trigger cleanup of orphaned launcher files"""
+        self.update_queue.put(('cleanup', None))
+        logger.info("Triggered orphaned launcher cleanup")
+    
     def _scan_loop(self):
         """Main scanning loop"""
         while self.is_running:
@@ -82,6 +87,8 @@ class BackgroundScanner:
                             self._perform_scan(scan_type=data)
                         elif action == 'dirty':
                             self._process_dirty_projects()
+                        elif action == 'cleanup':
+                            self._perform_cleanup()
                 except:
                     pass
                 
@@ -154,6 +161,7 @@ class BackgroundScanner:
         
         projects_found = len(discovered_projects)
         projects_updated = 0
+        projects_missing = 0
         current_paths = set()
         
         for project in discovered_projects:
@@ -189,14 +197,27 @@ class BackgroundScanner:
                         except:
                             pass
         
-        # Mark missing projects as inactive
+        # Detect and mark missing projects as inactive
+        missing_projects = []
         for path, existing in existing_projects.items():
             if path not in current_paths and existing['status'] == 'active':
                 if not os.path.exists(path):
                     db.mark_project_inactive(path)
-                    logger.info(f"Marked inactive: {existing['name']}")
+                    missing_projects.append(existing)
+                    projects_missing += 1
+                    logger.warning(f"Project folder deleted - marked inactive: {existing['name']} ({path})")
         
-        logger.info(f"Full scan complete: {projects_found} found, {projects_updated} updated")
+        # Notify UI about missing projects if any found
+        if missing_projects and self.update_callback:
+            try:
+                self.update_callback('projects_missing', {
+                    'count': len(missing_projects),
+                    'projects': missing_projects
+                })
+            except:
+                pass
+        
+        logger.info(f"Full scan complete: {projects_found} found, {projects_updated} updated, {projects_missing} missing")
         return projects_found, projects_updated
     
     def _quick_scan(self) -> tuple[int, int]:
@@ -250,11 +271,17 @@ class BackgroundScanner:
         return len(new_projects), projects_updated
     
     def _process_dirty_projects(self):
-        """Process projects marked as dirty"""
+        """Process projects marked as dirty and clean up inactive projects"""
         dirty_projects = db.get_dirty_projects()
         
+        # Also clean up inactive projects and their custom launchers
+        inactive_cleanup_count = self._cleanup_inactive_projects()
+        
         if not dirty_projects:
-            logger.info("No dirty projects to process")
+            if inactive_cleanup_count > 0:
+                logger.info(f"No dirty projects to process, but cleaned up {inactive_cleanup_count} inactive projects")
+            else:
+                logger.info("No dirty projects to process")
             return
         
         logger.info(f"Processing {len(dirty_projects)} dirty projects...")
@@ -310,7 +337,76 @@ class BackgroundScanner:
         with ThreadPoolExecutor(max_workers=3) as executor:
             executor.map(process_single_project, dirty_projects)
         
-        logger.info(f"Completed processing {len(dirty_projects)} dirty projects")
+        total_msg = f"Completed processing {len(dirty_projects)} dirty projects"
+        if inactive_cleanup_count > 0:
+            total_msg += f" and cleaned up {inactive_cleanup_count} inactive projects"
+        logger.info(total_msg)
+    
+    def _cleanup_inactive_projects(self):
+        """Clean up inactive projects by removing their custom launchers and orphaned files"""
+        try:
+            # Get all inactive projects
+            inactive_projects = db.get_all_projects(active_only=False)
+            inactive_projects = [p for p in inactive_projects if p.get('status') == 'inactive']
+            
+            # Get all active projects for orphan detection
+            active_projects = db.get_all_projects(active_only=True)
+            active_safe_names = set()
+            for project in active_projects:
+                project_name = project.get('name', 'Unknown')
+                safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+                active_safe_names.add(safe_name)
+            
+            cleaned_count = 0
+            removed_launchers = []
+            
+            # Clean up launchers for inactive projects
+            for project in inactive_projects:
+                project_name = project.get('name', 'Unknown')
+                project_path = project.get('path', '')
+                
+                # Check if custom launcher exists and remove it
+                safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+                custom_launcher_path = Path("custom_launchers") / f"{safe_name}.sh"
+                
+                if custom_launcher_path.exists():
+                    try:
+                        custom_launcher_path.unlink()
+                        removed_launchers.append(project_name)
+                        cleaned_count += 1
+                        logger.info(f"Removed custom launcher for inactive project: {project_name}")
+                    except Exception as e:
+                        logger.error(f"Failed to remove custom launcher for {project_name}: {e}")
+            
+            # Clean up truly orphaned launcher files (no corresponding active project)
+            custom_dir = Path("custom_launchers")
+            if custom_dir.exists():
+                for launcher_file in custom_dir.glob("*.sh"):
+                    safe_name = launcher_file.stem
+                    if safe_name not in active_safe_names:
+                        try:
+                            launcher_file.unlink()
+                            removed_launchers.append(f"orphaned-{safe_name}")
+                            cleaned_count += 1
+                            logger.info(f"Removed orphaned launcher file: {launcher_file.name}")
+                        except Exception as e:
+                            logger.error(f"Failed to remove orphaned launcher {launcher_file.name}: {e}")
+            
+            # Notify UI about cleanup if any launchers were removed
+            if removed_launchers and self.update_callback:
+                try:
+                    self.update_callback('launchers_cleaned', {
+                        'count': len(removed_launchers),
+                        'projects': removed_launchers
+                    })
+                except:
+                    pass
+            
+            return cleaned_count
+            
+        except Exception as e:
+            logger.error(f"Error during inactive project cleanup: {e}")
+            return 0
     
     def _perform_ai_analysis(self):
         """Perform AI analysis on projects that need it (daily)"""
@@ -413,6 +509,29 @@ class BackgroundScanner:
         
         logger.info(f"Completed daily AI analysis: {len(projects_needing_analysis)} projects processed")
         return len(projects_needing_analysis), len(projects_needing_analysis)
+    
+    def _perform_cleanup(self):
+        """Perform cleanup of orphaned launcher files"""
+        session_id = f"cleanup_{uuid.uuid4().hex[:8]}"
+        logger.info(f"Starting cleanup session: {session_id}")
+        
+        try:
+            cleanup_count = self._cleanup_inactive_projects()
+            
+            # Notify UI about cleanup results
+            if self.update_callback:
+                try:
+                    self.update_callback('cleanup_complete', {
+                        'session_id': session_id,
+                        'files_cleaned': cleanup_count
+                    })
+                except Exception as e:
+                    logger.error(f"Error calling update callback: {e}")
+            
+            logger.info(f"Cleanup session {session_id} complete: {cleanup_count} files removed")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup session {session_id}: {e}")
     
     def _prepare_project_data(self, project: Dict, existing: Optional[Dict] = None) -> Dict:
         """Prepare project data for database storage"""

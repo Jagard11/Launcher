@@ -3,7 +3,7 @@
 import gradio as gr
 import argparse
 import sys
-import logging
+import logging 
 import json
 import time
 import threading
@@ -306,6 +306,25 @@ class UnifiedLauncher:
                         break
                 self.ui_needs_refresh = True
                 logger.info(f"Updated project in UI: {data.get('name', 'Unknown')}")
+                
+            elif event_type == 'projects_missing':
+                # Handle missing projects detection
+                missing_count = data.get('count', 0)
+                missing_projects = data.get('projects', [])
+                
+                project_names = [p.get('name', 'Unknown') for p in missing_projects]
+                logger.warning(f"Scan detected {missing_count} missing project folders: {', '.join(project_names)}")
+                
+                # Reload projects to ensure UI is in sync (removes inactive projects from view)
+                self.load_projects_from_db()
+                self.ui_needs_refresh = True
+                
+            elif event_type == 'launchers_cleaned':
+                # Handle custom launcher cleanup
+                cleaned_count = data.get('count', 0)
+                cleaned_projects = data.get('projects', [])
+                
+                logger.info(f"Process cleaned up {cleaned_count} custom launchers for removed projects: {', '.join(cleaned_projects)}")
                 
             elif event_type == 'scan_complete':
                 scan_info = data
@@ -860,7 +879,12 @@ class UnifiedLauncher:
                         self.scanner.trigger_scan()
                     self.load_projects_from_db()
                     stats = db.get_stats()
-                    status_md = f"**Status:** Scan Complete • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
+                    
+                    status_parts = [f"**Projects:** {stats['active_projects']}"]
+                    if stats['dirty_projects'] > 0:
+                        status_parts.append(f"**Pending Updates:** {stats['dirty_projects']}")
+                    
+                    status_md = f"**Status:** Scan Complete • {' • '.join(status_parts)}"
                     projects_html = self.create_projects_grid(self.current_projects, api_port)
                     return status_md, projects_html
                 except Exception as e:
@@ -1004,6 +1028,39 @@ class UnifiedLauncher:
             
             manual_scan_btn.click(
                 handle_manual_scan,
+                outputs=[status_display, projects_display]
+            )
+            
+            def handle_process_dirty():
+                try:
+                    cleanup_count = 0
+                    if self.scanner:
+                        # Get actual cleanup count first
+                        cleanup_count = self.scanner._cleanup_inactive_projects()
+                        # Then trigger dirty project processing
+                        self.scanner.trigger_dirty_cleanup()
+                    
+                    self.load_projects_from_db()
+                    stats = db.get_stats()
+                    
+                    status_parts = [f"**Projects:** {stats['active_projects']}"]
+                    if stats['dirty_projects'] > 0:
+                        status_parts.append(f"**Pending Updates:** {stats['dirty_projects']}")
+                    
+                    # Show actual cleanup results
+                    if cleanup_count > 0:
+                        status_parts.append(f"**Cleaned:** {cleanup_count} launcher files")
+                    else:
+                        status_parts.append("**System:** Clean")
+                    
+                    status_md = f"**Status:** Processing Complete • {' • '.join(status_parts)}"
+                    projects_html = self.create_projects_grid(self.current_projects, api_port)
+                    return status_md, projects_html
+                except Exception as e:
+                    return f"**Status:** Processing Error: {str(e)}", gr.update()
+            
+            process_dirty_btn.click(
+                handle_process_dirty,
                 outputs=[status_display, projects_display]
             )
             
