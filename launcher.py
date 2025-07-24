@@ -850,11 +850,6 @@ class UnifiedLauncher:
             # Projects display
             projects_display = gr.HTML(self.create_projects_grid(self.current_projects, api_port))
             
-            # Launch output
-            with gr.Row():
-                launch_output = gr.Textbox(label="Launch Output", interactive=False)
-                project_details = gr.Markdown("Click on a project name to see details")
-            
             # Hidden components for instant launches (styled hidden but DOM accessible)
             with gr.Row(elem_classes="hidden-launch-controls"):
                 instant_launch_input = gr.Textbox(elem_id="instant_launch_data", container=False, show_label=False)
@@ -1003,11 +998,7 @@ class UnifiedLauncher:
                 outputs=[status_display, projects_display]
             )
             
-            launch_trigger.click(
-                handle_launch,
-                inputs=[project_name_input, project_path_input],
-                outputs=[launch_output]
-            )
+
             
             # Add JavaScript for launch functionality and favorite/hide buttons
             gr.HTML(f"""
@@ -1440,12 +1431,11 @@ def main():
                 build_settings_ui()
         
         # Global hidden components for favorite/hidden toggles (always available)
-        with gr.Row(visible=True):  # Temporarily visible for debugging
-            gr.HTML("<h4>🔧 DEBUG: Hidden Toggle Components (should be hidden in production)</h4>")
-            toggle_favorite_path = gr.Textbox(label="DEBUG: Favorite Path", elem_id="toggle_favorite_path")
-            toggle_hidden_path = gr.Textbox(label="DEBUG: Hidden Path", elem_id="toggle_hidden_path")
-            favorite_trigger = gr.Button("DEBUG: Toggle Favorite", elem_id="favorite_trigger")
-            hidden_trigger = gr.Button("DEBUG: Toggle Hidden", elem_id="hidden_trigger")
+        with gr.Row(visible=False):  # Hidden components for JavaScript access
+            toggle_favorite_path = gr.Textbox(label="Favorite Path", elem_id="toggle_favorite_path", show_label=False)
+            toggle_hidden_path = gr.Textbox(label="Hidden Path", elem_id="toggle_hidden_path", show_label=False)
+            favorite_trigger = gr.Button("Toggle Favorite", elem_id="favorite_trigger")
+            hidden_trigger = gr.Button("Toggle Hidden", elem_id="hidden_trigger")
         
         # Global handler functions for favorite/hidden toggles
         def handle_toggle_favorite(project_path):
