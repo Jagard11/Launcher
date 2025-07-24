@@ -119,7 +119,6 @@ if [ "$EXISTING_PROCESSES" -gt 0 ]; then
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         pkill -f "unified_launcher.py" 2>/dev/null
         pkill -f "persistent_launcher.py" 2>/dev/null
-        pkill -f "enhanced_launcher.py" 2>/dev/null
         print_color $GREEN "✅ Stopped existing processes"
         sleep 3
     else
@@ -165,6 +164,6 @@ elif [ -f "persistent_launcher.py" ]; then
     print_color $YELLOW "⚠️  Unified launcher not found, using persistent launcher..."
     exec python3 persistent_launcher.py
 else
-    print_color $YELLOW "⚠️  No launcher found, using enhanced launcher..."
-    exec python3 enhanced_launcher.py
+    print_color $RED "❌ No launcher found! Please ensure unified_launcher.py exists."
+    exit 1
 fi 

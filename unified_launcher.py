@@ -10,6 +10,7 @@ from typing import Dict
 # Import existing modules
 from project_database import db
 from database_ui import build_database_ui
+from settings_ui import build_settings_ui, config_exists, create_default_config
 from background_scanner import get_scanner
 from environment_detector import EnvironmentDetector
 from logger import logger
@@ -236,8 +237,14 @@ def main():
     
     args = parser.parse_args()
     
-    # Load configuration
+    # Load configuration with fallback handling
     try:
+        if not config_exists():
+            print("⚠️  Config file not found, creating default configuration")
+            if create_default_config():
+                print("✅ Default config.json created")
+            else:
+                print("❌ Failed to create default config.json")
         config = load_config()
     except Exception as e:
         print(f"❌ Error loading config: {e}")
@@ -266,26 +273,42 @@ def main():
             if not args.verbose:
                 print("Use --verbose for more details")
     
+    # Determine if we should default to settings tab (config missing or empty)
+    default_tab = "settings" if not config.get('index_directories') else "app_list"
+    
     # Create the main interface with custom tab buttons for URL routing
     with gr.Blocks(title="🚀 AI Project Launcher", theme=gr.themes.Soft()) as app:
         # State management for URL routing
-        current_main_tab = gr.State(value="app_list")
+        current_main_tab = gr.State(value=default_tab)
         current_subtab = gr.State(value="query")
         
         gr.Markdown("# 🚀 AI Project Launcher")
         gr.Markdown("Unified interface for discovering, managing, and launching your AI projects")
         
+        # Show configuration warning if needed
+        if not config.get('index_directories'):
+            gr.Markdown("⚠️ **Configuration Required:** No directories configured for indexing. Please configure directories in the Settings tab.")
+        
         # Main tab buttons
         with gr.Row():
-            app_list_btn = gr.Button("App List", variant="primary", size="lg")
+            app_list_btn = gr.Button("App List", variant="primary" if default_tab == "app_list" else "secondary", size="lg")
             database_btn = gr.Button("Database", variant="secondary", size="lg")
+            settings_btn = gr.Button("Settings", variant="primary" if default_tab == "settings" else "secondary", size="lg")
         
         # Content areas
-        with gr.Column(visible=True) as app_list_content:
-            launcher.build_app_list_tab(args.api_port)
+        with gr.Column(visible=(default_tab == "app_list")) as app_list_content:
+            if config.get('index_directories'):
+                launcher.build_app_list_tab(args.api_port)
+            else:
+                gr.Markdown("### 📁 No Directories Configured")
+                gr.Markdown("Please configure directories to index in the **Settings** tab before using the launcher.")
         
         with gr.Column(visible=False) as database_content:
             build_database_ui(launcher=launcher.persistent_launcher)
+        
+        # Settings tab content
+        with gr.Column(visible=(default_tab == "settings")) as settings_content:
+            build_settings_ui()
         
         # Tab switching functions
         def switch_to_app_list():
@@ -294,8 +317,10 @@ def main():
                 "",  # current_subtab  
                 gr.update(variant="primary"),  # app_list_btn
                 gr.update(variant="secondary"),  # database_btn
+                gr.update(variant="secondary"),  # settings_btn
                 gr.update(visible=True),  # app_list_content
                 gr.update(visible=False),  # database_content
+                gr.update(visible=False),  # settings_content
             )
         
         def switch_to_database():
@@ -304,8 +329,22 @@ def main():
                 "query",  # current_subtab
                 gr.update(variant="secondary"),  # app_list_btn
                 gr.update(variant="primary"),  # database_btn
+                gr.update(variant="secondary"),  # settings_btn
                 gr.update(visible=False),  # app_list_content
                 gr.update(visible=True),  # database_content
+                gr.update(visible=False),  # settings_content
+            )
+        
+        def switch_to_settings():
+            return (
+                "settings",  # current_main_tab
+                "",  # current_subtab
+                gr.update(variant="secondary"),  # app_list_btn
+                gr.update(variant="secondary"),  # database_btn
+                gr.update(variant="primary"),  # settings_btn
+                gr.update(visible=False),  # app_list_content
+                gr.update(visible=False),  # database_content
+                gr.update(visible=True),  # settings_content
             )
         
         # Wire up main tab buttons
@@ -313,8 +352,8 @@ def main():
             fn=switch_to_app_list,
             outputs=[
                 current_main_tab, current_subtab,
-                app_list_btn, database_btn,
-                app_list_content, database_content
+                app_list_btn, database_btn, settings_btn,
+                app_list_content, database_content, settings_content
             ]
         )
         
@@ -322,8 +361,17 @@ def main():
             fn=switch_to_database,
             outputs=[
                 current_main_tab, current_subtab,
-                app_list_btn, database_btn,
-                app_list_content, database_content
+                app_list_btn, database_btn, settings_btn,
+                app_list_content, database_content, settings_content
+            ]
+        )
+        
+        settings_btn.click(
+            fn=switch_to_settings,
+            outputs=[
+                current_main_tab, current_subtab,
+                app_list_btn, database_btn, settings_btn,
+                app_list_content, database_content, settings_content
             ]
         )
         
@@ -354,7 +402,7 @@ def main():
                 // Function to activate tab from URL on page load
                 function activateTabFromURL() {
                     const urlParams = new URLSearchParams(window.location.search);
-                    const requestedTab = urlParams.get('tab') || 'app_list';
+                    const requestedTab = urlParams.get('tab') || '""" + default_tab + """';
                     const requestedSubtab = urlParams.get('subtab') || 'query';
                     
                     console.log(`📍 Activating from URL: tab=${requestedTab}, subtab=${requestedSubtab}`);
@@ -367,7 +415,8 @@ def main():
                             const buttonText = button.textContent.toLowerCase().trim();
                             
                             if ((requestedTab === 'app_list' && buttonText === 'app list') ||
-                                (requestedTab === 'database' && buttonText === 'database')) {
+                                (requestedTab === 'database' && buttonText === 'database') ||
+                                (requestedTab === 'settings' && buttonText === 'settings')) {
                                 console.log(`🎯 Clicking main tab: ${button.textContent}`);
                                 button.click();
                                 
@@ -419,6 +468,8 @@ def main():
                                         updateURL('app_list');
                                     } else if (buttonText === 'database') {
                                         updateURL('database', 'query');
+                                    } else if (buttonText === 'settings') {
+                                        updateURL('settings');
                                     }
                                     // Subtab buttons
                                     else if (buttonText.includes('query')) {
