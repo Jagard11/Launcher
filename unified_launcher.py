@@ -145,7 +145,7 @@ class UnifiedLauncher:
                     return f"**Status:** Scan Error: {str(e)}", gr.update()
             
             def handle_refresh():
-                self.persistent_launcher.load_projects()
+                self.persistent_launcher.load_projects_from_db()
                 stats = db.get_stats()
                 status_md = f"**Status:** Refreshed • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
                 projects_html = self.persistent_launcher.create_projects_grid(self.persistent_launcher.current_projects, api_port)
@@ -278,7 +278,7 @@ def main():
             
             # Database tab
             with gr.Tab("Database", id="database") as database_tab:
-                build_database_ui()
+                build_database_ui(launcher=launcher.persistent_launcher)
     
     print("🚀 =================================")
     print("🚀 Unified AI Project Launcher")

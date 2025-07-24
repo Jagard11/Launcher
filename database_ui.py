@@ -113,7 +113,7 @@ LIMIT 100"""
         except Exception as e:
             return f"❌ Error getting stats: {str(e)}"
 
-def build_database_ui():
+def build_database_ui(launcher=None):
     """Build the database UI components"""
     db_ui = DatabaseUI()
     
@@ -213,8 +213,147 @@ def build_database_ui():
 - **Environment Breakdown**: Count of projects by detected environment type
 - **Activity**: Recent project updates and additions
                     """)
+            
+            # Tools Tab
+            with gr.Tab("🛠️ Tools"):
+                with gr.Column():
+                    gr.Markdown("### Project Management Tools")
+                    gr.Markdown("Advanced tools for managing project launch methods and database maintenance")
+                    
+                    if launcher is not None:
+                        # Launch Command Rebuilding
+                        with gr.Row():
+                            gr.Markdown("### 🔄 Launch Command Management")
+                        
+                        with gr.Row():
+                            with gr.Column(scale=2):
+                                rebuild_launch_btn = gr.Button(
+                                    "🔄 Rebuild All Launch Commands", 
+                                    variant="primary"
+                                )
+                            with gr.Column(scale=3):
+                                gr.Markdown("""
+**Rebuild All Launch Commands**: Re-analyzes all projects using the new AI detection system. 
+This will mark all projects as dirty and trigger background processing to update launch methods.
+                                """)
+                        
+                        # Individual Project Re-analysis
+                        with gr.Row():
+                            gr.Markdown("### 🔍 Individual Project Re-analysis")
+                        
+                        with gr.Row():
+                            with gr.Column(scale=3):
+                                reanalyze_path_input = gr.Textbox(
+                                    label="Project Path",
+                                    placeholder="Enter full project path to re-analyze launch method",
+                                    elem_id="tools_reanalyze_path_input"
+                                )
+                            with gr.Column(scale=1):
+                                reanalyze_btn = gr.Button("🔍 Re-analyze Project", variant="secondary")
+                        
+                        with gr.Row():
+                            with gr.Column():
+                                gr.Markdown("""
+**Individual Re-analysis**: Force immediate re-analysis of a specific project's launch method. 
+Enter the full path to the project directory and click Re-analyze to update just that project.
+                                """)
+                        
+                        # Database Maintenance
+                        with gr.Row():
+                            gr.Markdown("### 🧹 Database Maintenance")
+                        
+                        with gr.Row():
+                            cleanup_btn = gr.Button("🧹 Cleanup Old Data", variant="secondary")
+                            mark_all_dirty_btn = gr.Button("🏃 Mark All Dirty", variant="secondary")
+                        
+                        # Tools output
+                        with gr.Row():
+                            tools_output = gr.Textbox(
+                                label="Tools Output", 
+                                interactive=False, 
+                                lines=8,
+                                placeholder="Tool execution results will appear here..."
+                            )
+                        
+                        # Helper functions
+                        def mark_all_projects_dirty():
+                            """Mark all projects as dirty for re-analysis"""
+                            try:
+                                from project_database import db
+                                conn = sqlite3.connect(db.db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE projects SET dirty_flag = 1")
+                                updated_count = cursor.rowcount
+                                conn.commit()
+                                conn.close()
+                                
+                                # Trigger background processing
+                                if hasattr(launcher, 'scanner') and launcher.scanner:
+                                    launcher.scanner.trigger_dirty_cleanup()
+                                
+                                return f"✅ Marked {updated_count} projects as dirty for re-analysis. Background processing triggered."
+                            except Exception as e:
+                                return f"❌ Error marking projects as dirty: {str(e)}"
+                        
+                        def cleanup_database():
+                            """Clean up old scan sessions and optimize database"""
+                            try:
+                                from project_database import db
+                                
+                                # Clean up old scan sessions (older than 30 days)
+                                db.cleanup_old_sessions(days=30)
+                                
+                                # Optimize database
+                                conn = sqlite3.connect(db.db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("VACUUM")
+                                conn.commit()
+                                conn.close()
+                                
+                                return "✅ Database cleanup completed. Removed old scan sessions and optimized database."
+                            except Exception as e:
+                                return f"❌ Error during database cleanup: {str(e)}"
+                        
+                        # Wire up tool events
+                        rebuild_launch_btn.click(
+                            launcher.rebuild_launch_commands,
+                            outputs=[tools_output]
+                        )
+                        
+                        reanalyze_btn.click(
+                            launcher.force_reanalyze_project,
+                            inputs=[reanalyze_path_input],
+                            outputs=[tools_output]
+                        )
+                        
+                        mark_all_dirty_btn.click(
+                            mark_all_projects_dirty,
+                            outputs=[tools_output]
+                        )
+                        
+                        cleanup_btn.click(
+                            cleanup_database,
+                            outputs=[tools_output]
+                        )
+                        
+                    else:
+                        # Show message when launcher is not available
+                        gr.Markdown("""
+### ⚠️ Tools Unavailable
+
+The project management tools are not available in this interface. 
+Tools are only available when using the unified launcher.
+
+**Available Tools (when launcher is available):**
+- 🔄 Rebuild All Launch Commands
+- 🔍 Individual Project Re-analysis  
+- 🧹 Database Cleanup
+- 🏃 Mark All Projects Dirty
+
+**To access tools:** Use the unified launcher instead of the standalone database viewer.
+                        """)
         
-        # Event handlers
+        # Event handlers for non-tools tabs
         def update_schema(table_name):
             """Update schema display when table is selected"""
             if table_name:
@@ -238,7 +377,7 @@ def build_database_ui():
             """Clear the query textbox"""
             return ""
         
-        # Wire up events
+        # Wire up events for non-tools tabs
         table_dropdown.change(
             update_schema,
             inputs=[table_dropdown],

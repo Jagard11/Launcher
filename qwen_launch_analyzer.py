@@ -4,9 +4,11 @@ import subprocess
 import json
 import os
 import time
+import stat
 from pathlib import Path
 from typing import Optional, Dict, List
 from logger import logger
+from environment_detector import EnvironmentDetector
 
 class QwenLaunchAnalyzer:
     def __init__(self):
@@ -14,6 +16,10 @@ class QwenLaunchAnalyzer:
         self.primary_model = "qwen3:8b"         # Fast and efficient for most analysis
         self.advanced_model = "qwen3:14b"       # For complex projects
         self.fallback_model = "qwen3:8b"        # Fallback option
+        
+        # Create custom launchers directory if it doesn't exist
+        self.custom_launchers_dir = Path("custom_launchers")
+        self.custom_launchers_dir.mkdir(exist_ok=True)
         
     def call_qwen(self, model: str, prompt: str) -> str:
         """Call Qwen model with the specified prompt"""
@@ -50,6 +56,136 @@ class QwenLaunchAnalyzer:
             print(f"💥 Qwen exception with {model}: {error_msg}")
             return ""
     
+    def check_custom_launcher(self, project_path: str, project_name: str) -> Optional[Dict]:
+        """Check if user has created a custom launcher for this project"""
+        # Clean project name for filename
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+        custom_launcher_path = self.custom_launchers_dir / f"{safe_name}.sh"
+        
+        if custom_launcher_path.exists():
+            return {
+                'main_script': f"custom_launchers/{safe_name}.sh",
+                'launch_command': f"./custom_launchers/{safe_name}.sh",
+                'working_directory': '.',
+                'requires_args': '',
+                'launch_type': 'custom_launcher',
+                'description': f"Custom user-defined launcher for {project_name}",
+                'confidence': 1.0,
+                'notes': 'User-created custom launcher script',
+                'analysis_method': 'custom_override',
+                'model_used': 'none',
+                'analyzed_at': time.time()
+            }
+        
+        return None
+    
+    def create_custom_launcher_template(self, project_path: str, project_name: str, suggested_command: str = "") -> str:
+        """Create a custom launcher template for the user to edit"""
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+        custom_launcher_path = self.custom_launchers_dir / f"{safe_name}.sh"
+        
+        # If we have a suggested command, use it directly
+        if suggested_command and suggested_command.strip():
+            launch_command = suggested_command
+        else:
+            # Determine a good default command based on project analysis
+            structure = self.analyze_project_structure(project_path)
+            env_detector = EnvironmentDetector()
+            env_info = env_detector.detect_environment(project_path)
+            
+            # Use direct fallback analysis to get a real command
+            analysis = self._enhanced_fallback_analysis(
+                structure, project_path, project_name, 
+                env_info.get('type', 'none'), env_info.get('name', '')
+            )
+            
+            launch_command = analysis.get('launch_command', '')
+            
+            # If the fallback analysis returns a custom launcher (recursive), use direct heuristics
+            if launch_command.startswith('./custom_launchers/'):
+                # Use smart detection based on project name and structure
+                project_name_lower = project_name.lower()
+                
+                if "stable" in project_name_lower and "diffusion" in project_name_lower:
+                    launch_command = "./webui.sh"
+                elif "comfyui" in project_name_lower:
+                    launch_command = "python main.py"
+                elif "text-generation" in project_name_lower or "oobabooga" in project_name_lower:
+                    launch_command = "./start_linux.sh"
+                elif "kohya" in project_name_lower:
+                    launch_command = "python gui.py"
+                elif "invokeai" in project_name_lower:
+                    launch_command = "invokeai-web"
+                elif "fooocus" in project_name_lower:
+                    launch_command = "python launch.py"
+                else:
+                    # Check for obvious launch files in the project
+                    path_obj = Path(project_path)
+                    
+                    # High priority shell scripts
+                    priority_scripts = ['webui.sh', 'start.sh', 'run.sh', 'launch.sh', 'start_linux.sh']
+                    for script in priority_scripts:
+                        if (path_obj / script).exists():
+                            launch_command = f"./{script}"
+                            break
+                    
+                    if launch_command.startswith('./custom_launchers/'):  # Still not found
+                        # Framework detection
+                        if structure['requirements']:
+                            req_text = ' '.join(structure['requirements']).lower()
+                            if 'streamlit' in req_text and 'app.py' in structure['python_files']:
+                                launch_command = "streamlit run app.py"
+                            elif 'gradio' in req_text and 'app.py' in structure['python_files']:
+                                launch_command = "python app.py"
+                            elif 'fastapi' in req_text and 'main.py' in structure['python_files']:
+                                launch_command = "uvicorn main:app --host 0.0.0.0 --port 8000"
+                        
+                        # Final fallback to common Python files
+                        if launch_command.startswith('./custom_launchers/'):
+                            common_files = ['app.py', 'main.py', 'run.py', 'server.py']
+                            for file in common_files:
+                                if file in structure['python_files']:
+                                    launch_command = f"python {file}"
+                                    break
+                            
+                            # If still no command found, use the most promising file
+                            if launch_command.startswith('./custom_launchers/') and structure['python_files']:
+                                launch_command = f"python {structure['python_files'][0]}"
+        
+        # Final safety check - never create a recursive launcher
+        if not launch_command or launch_command.startswith('./custom_launchers/'):
+            launch_command = "echo 'Please edit this script to add your launch command'"
+        
+        template_content = f"""#!/bin/bash
+# Custom launcher for {project_name}
+# Project path: {project_path}
+# 
+# Edit this script to customize how this project launches
+# The launcher will automatically cd to the project directory before running
+
+set -e  # Exit on error
+
+echo "🚀 Launching {project_name}..."
+cd "{project_path}"
+
+# Launch command (auto-generated by AI analysis)
+{launch_command}
+
+echo "✅ {project_name} launched"
+"""
+        
+        try:
+            with open(custom_launcher_path, 'w') as f:
+                f.write(template_content)
+            
+            # Make it executable
+            os.chmod(custom_launcher_path, 0o755)
+            
+            return str(custom_launcher_path)
+        except Exception as e:
+            logger.error(f"Failed to create custom launcher template: {e}")
+            return ""
+
     def analyze_project_structure(self, project_path: str) -> Dict:
         """Analyze project structure to understand its layout"""
         path_obj = Path(project_path)
@@ -59,6 +195,7 @@ class QwenLaunchAnalyzer:
             'config_files': [],
             'requirements': [],
             'scripts': [],
+            'executable_scripts': [],
             'directories': [],
             'readme_content': '',
             'dockerfile': False,
@@ -120,12 +257,20 @@ class QwenLaunchAnalyzer:
                 except:
                     pass
             
-            # Get script files
-            script_patterns = ['*.sh', '*.bat', 'launch*', 'run*', 'start*']
+            # Enhanced script detection with executable check
+            script_patterns = ['*.sh', '*.bat', 'launch*', 'run*', 'start*', 'webui*']
             for pattern in script_patterns:
                 for script_file in path_obj.glob(pattern):
                     if script_file.is_file():
                         structure['scripts'].append(script_file.name)
+                        
+                        # Check if script is executable
+                        try:
+                            file_stat = script_file.stat()
+                            if file_stat.st_mode & stat.S_IEXEC:
+                                structure['executable_scripts'].append(script_file.name)
+                        except:
+                            pass
         
         except Exception as e:
             logger.error(f"Error analyzing project structure for {project_path}: {e}")
@@ -133,86 +278,228 @@ class QwenLaunchAnalyzer:
         return structure
     
     def generate_launch_command(self, project_path: str, project_name: str, env_type: str = "none", env_name: str = "") -> Dict:
-        """Generate intelligent launch command using Qwen3"""
+        """Generate intelligent launch command using AI analysis, with user interaction for uncertainty"""
         structure = self.analyze_project_structure(project_path)
         
-        # Create context for the AI
+        # First, check if user has created a custom launcher
+        custom_launcher = self.check_custom_launcher(project_path, project_name)
+        if custom_launcher:
+            return custom_launcher
+        
+        # Read key files for better context
+        key_files_content = self._read_key_files(project_path, structure)
+        
+        # Create comprehensive context for intelligent AI analysis
         context = f"""
-Project Analysis for: {project_name}
+PROJECT ANALYSIS REQUEST
+
+Project: {project_name}
 Location: {project_path}
 Environment: {env_type} ({env_name})
 
-Python Files Found: {structure['python_files'][:10]}
-Configuration Files: {structure['config_files']}
-Requirements: {structure['requirements'][:10]}
-Script Files: {structure['scripts']}
-Directories: {structure['directories'][:10]}
-Has Dockerfile: {structure['dockerfile']}
-Has Docker Compose: {structure['docker_compose']}
-Has Package.json: {structure['package_json']}
-Has Makefile: {structure['makefile']}
+STRUCTURE ANALYSIS:
+- Python files: {structure['python_files'][:15]}
+- Script files: {structure['scripts']}
+- Executable scripts: {structure['executable_scripts']}
+- Configuration files: {structure['config_files']}
+- Dependencies: {structure['requirements'][:15]}
+- Directories: {structure['directories'][:10]}
+- Has Dockerfile: {structure['dockerfile']}
+- Has Docker Compose: {structure['docker_compose']}
+- Has package.json: {structure['package_json']}
+- Has Makefile: {structure['makefile']}
 
-README Content (first 1000 chars):
-{structure['readme_content'][:1000]}
+KEY FILES CONTENT:
+{key_files_content}
+
+README CONTENT (first 2000 chars):
+{structure['readme_content'][:2000]}
 """
         
-        prompt = f"""Analyze this software project structure and determine the best launch command.
+        # Intelligent AI prompt that encourages analysis and handles uncertainty
+        prompt = f"""You are an expert software engineer analyzing a project to determine the best launch method. Analyze this project structure carefully and provide your assessment.
 
 {context}
 
-Respond with ONLY valid JSON in this exact format (no thinking, no explanations, just JSON):
+ANALYSIS INSTRUCTIONS:
+1. Read through ALL the information provided carefully
+2. Look for clues in README files, script names, dependencies, and project structure
+3. Consider what type of application this appears to be (web app, ML training, GUI tool, etc.)
+4. Identify ALL possible launch methods you can find
+5. Evaluate each method's likelihood of success
+6. If you're uncertain or find multiple valid options, indicate this clearly
+
+RESPONSE FORMAT - Return ONLY valid JSON:
 {{
-    "main_script": "primary script file name",
-    "launch_command": "exact command to run",
-    "working_directory": ".",
-    "requires_args": "",
-    "launch_type": "python_script",
-    "description": "brief description",
-    "confidence": 0.8,
-    "notes": "any notes"
+    "primary_launch": {{
+        "command": "exact command to run",
+        "confidence": 0.0-1.0,
+        "reasoning": "why you chose this method"
+    }},
+    "alternative_launches": [
+        {{
+            "command": "alternative command",
+            "confidence": 0.0-1.0,
+            "reasoning": "why this might work"
+        }}
+    ],
+    "analysis": {{
+        "project_type": "your assessment of what this project is",
+        "main_script": "primary entry point file",
+        "working_directory": ".",
+        "requires_args": "",
+        "launch_type": "shell_script|python_script|docker|makefile|framework_specific|custom",
+        "description": "brief description of the project",
+        "uncertainty_notes": "any concerns or uncertainties",
+        "missing_launch_method": false,
+        "needs_user_input": false
+    }}
 }}
 
-Rules:
-- app.py, main.py, run.py, start.py, webui.py are main entry points
-- For Gradio: python app.py
-- For Streamlit: streamlit run app.py  
-- For Docker: use docker commands
-- Choose highest confidence option
-- Return ONLY JSON, no other text or tags"""
+IMPORTANT GUIDELINES:
+- Shell scripts (.sh) are often preferred for complex setups
+- Look for project-specific patterns (webui.sh for web UIs, main.py for Python apps)
+- Consider framework requirements (streamlit run for Streamlit, uvicorn for FastAPI)
+- Docker projects may prefer docker-compose or docker run
+- If no clear launch method exists, set "missing_launch_method": true
+- If multiple good options exist or you're unsure, set "needs_user_input": true
+- Be honest about uncertainty - don't guess if you're not confident
 
-        # Try to get response from Qwen
+Return ONLY the JSON response, no other text."""
+
+        # Get AI response
         response = self.call_qwen(self.primary_model, prompt)
         
         if not response:
-            # Fallback to simpler analysis
-            return self._fallback_analysis(structure, project_path, project_name, env_type, env_name)
+            # If AI fails, create a custom launcher template and ask user
+            template_path = self.create_custom_launcher_template(project_path, project_name)
+            return {
+                'main_script': 'unknown',
+                'launch_command': f"./custom_launchers/{Path(template_path).name}",
+                'working_directory': '.',
+                'requires_args': '',
+                'launch_type': 'needs_user_input',
+                'description': f"AI analysis failed - please edit {template_path}",
+                'confidence': 0.0,
+                'notes': f'AI analysis unavailable. Custom launcher template created at {template_path}. Please edit it with the correct launch command.',
+                'analysis_method': 'ai_failed_user_template',
+                'needs_user_input': True,
+                'custom_launcher_path': template_path,
+                'model_used': 'none',
+                'analyzed_at': time.time()
+            }
         
         try:
-            # Clean the response - remove thinking tags and extract JSON
-            cleaned_response = self._extract_json_from_response(response)
+            # Parse AI response
+            response_clean = self._clean_json_response(response)
+            result = json.loads(response_clean)
             
-            # Parse JSON response
-            result = json.loads(cleaned_response)
+            # Extract primary analysis
+            primary = result.get('primary_launch', {})
+            analysis = result.get('analysis', {})
+            alternatives = result.get('alternative_launches', [])
             
-            # Validate required fields
-            required_fields = ['main_script', 'launch_command', 'working_directory', 'launch_type', 'confidence']
-            if not all(field in result for field in required_fields):
-                logger.warning(f"Qwen response missing required fields for {project_name}, using fallback")
-                return self._fallback_analysis(structure, project_path, project_name, env_type, env_name)
+            # Determine if user input is needed
+            needs_user_input = (
+                analysis.get('needs_user_input', False) or
+                analysis.get('missing_launch_method', False) or
+                primary.get('confidence', 0) < 0.5 or
+                len(alternatives) > 1
+            )
             
-            # Add metadata
-            result['analysis_method'] = 'qwen3_ai'
-            result['model_used'] = self.primary_model
-            result['analyzed_at'] = time.time()
+            # If user input is needed, create a custom launcher template
+            custom_launcher_path = None
+            if needs_user_input:
+                suggested_commands = [primary.get('command', '')]
+                suggested_commands.extend([alt.get('command', '') for alt in alternatives])
+                suggestions = '\n# '.join([''] + [cmd for cmd in suggested_commands if cmd])
+                
+                custom_launcher_path = self.create_custom_launcher_template(
+                    project_path, project_name, f"# Suggested options:{suggestions}"
+                )
             
-            logger.info(f"Generated AI launch command for {project_name}: {result['launch_command']}")
-            return result
+            # Build final result
+            final_result = {
+                'main_script': analysis.get('main_script', primary.get('command', '').split()[-1]),
+                'launch_command': primary.get('command', 'echo "No launch method determined"'),
+                'working_directory': analysis.get('working_directory', '.'),
+                'requires_args': analysis.get('requires_args', ''),
+                'launch_type': analysis.get('launch_type', 'unknown'),
+                'description': analysis.get('description', f"Launch {project_name}"),
+                'confidence': primary.get('confidence', 0.0),
+                'notes': primary.get('reasoning', '') + (' | ' + analysis.get('uncertainty_notes', '') if analysis.get('uncertainty_notes') else ''),
+                'analysis_method': 'qwen_ai_intelligent',
+                'model_used': self.primary_model,
+                'analyzed_at': time.time(),
+                'needs_user_input': needs_user_input,
+                'alternatives': alternatives,
+                'ai_analysis': analysis
+            }
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse Qwen JSON response for {project_name}: {e}")
-            logger.debug(f"Raw response: {response[:500]}...")
-            return self._fallback_analysis(structure, project_path, project_name, env_type, env_name)
+            if custom_launcher_path:
+                final_result['custom_launcher_path'] = custom_launcher_path
+                final_result['launch_command'] = f"./custom_launchers/{Path(custom_launcher_path).name}"
+                final_result['launch_type'] = 'needs_user_input'
+            
+            return final_result
+            
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Failed to parse AI analysis for {project_name}: {e}")
+            # Fallback to enhanced heuristic analysis
+            return self._enhanced_fallback_analysis(structure, project_path, project_name, env_type, env_name)
     
+    def update_launch_command_in_db(self, project_path: str, new_launch_data: Dict) -> bool:
+        """Update launch command in database with user modifications"""
+        try:
+            from project_database import db
+            
+            # Get existing project data
+            project_data = db.get_project_by_path(project_path)
+            if not project_data:
+                logger.error(f"Project not found in database: {project_path}")
+                return False
+            
+            # Update with new launch data
+            update_data = {
+                'path': project_path,
+                'launch_command': new_launch_data.get('launch_command', ''),
+                'launch_type': new_launch_data.get('launch_type', 'user_modified'),
+                'launch_working_directory': new_launch_data.get('working_directory', '.'),
+                'launch_args': new_launch_data.get('requires_args', ''),
+                'launch_confidence': new_launch_data.get('confidence', 1.0),
+                'launch_notes': f"User modified: {new_launch_data.get('notes', '')}",
+                'launch_analysis_method': 'user_override',
+                'main_script': new_launch_data.get('main_script', ''),
+                'launch_analyzed_at': time.time()
+            }
+            
+            db.upsert_project(update_data)
+            logger.info(f"Updated launch command for {project_path}: {new_launch_data.get('launch_command')}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update launch command in database: {e}")
+            return False
+    
+    def get_launch_alternatives_for_ui(self, project_path: str, project_name: str) -> Dict:
+        """Get launch analysis with alternatives for UI display"""
+        analysis = self.generate_launch_command(project_path, project_name)
+        
+        # Format for UI display
+        ui_data = {
+            'current_command': analysis.get('launch_command', ''),
+            'confidence': analysis.get('confidence', 0.0),
+            'needs_user_input': analysis.get('needs_user_input', False),
+            'alternatives': analysis.get('alternatives', []),
+            'custom_launcher_path': analysis.get('custom_launcher_path'),
+            'analysis_notes': analysis.get('notes', ''),
+            'project_type': analysis.get('ai_analysis', {}).get('project_type', 'Unknown'),
+            'uncertainty_notes': analysis.get('ai_analysis', {}).get('uncertainty_notes', ''),
+            'missing_launch_method': analysis.get('ai_analysis', {}).get('missing_launch_method', False)
+        }
+        
+        return ui_data
+
     def _extract_json_from_response(self, response: str) -> str:
         """Extract JSON from Qwen response that may contain thinking tags"""
         if not response:
@@ -250,88 +537,176 @@ Rules:
         # If we couldn't find complete JSON, return empty object
         return "{}"
     
-    def _fallback_analysis(self, structure: Dict, project_path: str, project_name: str, env_type: str, env_name: str) -> Dict:
-        """Fallback analysis when AI fails"""
-        logger.info(f"Using fallback analysis for {project_name}")
+    def _enhanced_fallback_analysis(self, structure: Dict, project_path: str, project_name: str, env_type: str, env_name: str) -> Dict:
+        """Enhanced fallback analysis that prioritizes shell scripts and common patterns"""
+        logger.info(f"Using enhanced fallback analysis for {project_name}")
         
-        # Priority order for main scripts
-        priority_scripts = ['app.py', 'main.py', 'run.py', 'start.py', 'launch.py', 'webui.py', 'server.py']
-        
+        # First check for specific project patterns with lower confidence threshold
+        project_type = self.check_custom_launcher(project_path, project_name)
+        if project_type:
+            return project_type
+
+        # Priority order for launch methods
+        launch_type = "unknown"
         main_script = None
-        launch_type = "python_script"
+        launch_command = None
+        confidence = 0.1
         
-        # Find the best main script
-        for script in priority_scripts:
-            if script in structure['python_files']:
+        # 1. HIGHEST PRIORITY: Executable shell scripts with launch-specific names
+        priority_shell_scripts = [
+            'webui.sh', 'webui-user.sh', 'start.sh', 'run.sh', 'launch.sh', 
+            'start_linux.sh', 'run_linux.sh', 'start_webui.sh'
+        ]
+        
+        for script in priority_shell_scripts:
+            if script in structure['executable_scripts']:
                 main_script = script
+                launch_command = f"./{script}"
+                launch_type = "shell_script"
+                confidence = 0.9
                 break
+            elif script in structure['scripts']:
+                # Check if file exists and try to make it executable
+                script_path = Path(project_path) / script
+                if script_path.exists():
+                    main_script = script
+                    launch_command = f"./{script}"
+                    launch_type = "shell_script"
+                    confidence = 0.85
+                    break
         
-        # Check for nested scripts
-        if not main_script:
-            for py_file in structure['python_files']:
-                if '/' in py_file:
-                    subdir, filename = py_file.split('/', 1)
-                    if filename in priority_scripts:
-                        main_script = py_file
+        # 2. Framework-specific detection based on requirements
+        if not main_script and structure['requirements']:
+            req_text = ' '.join(structure['requirements']).lower()
+            
+            # Streamlit detection
+            if 'streamlit' in req_text and any(script in structure['python_files'] for script in ['app.py', 'main.py']):
+                for script in ['app.py', 'main.py']:
+                    if script in structure['python_files']:
+                        main_script = script
+                        launch_command = f"streamlit run {script}"
+                        launch_type = "streamlit_app"
+                        confidence = 0.85
+                        break
+            
+            # Gradio detection
+            elif 'gradio' in req_text and 'app.py' in structure['python_files']:
+                main_script = 'app.py'
+                launch_command = "python app.py"
+                launch_type = "gradio_app"
+                confidence = 0.8
+            
+            # FastAPI detection
+            elif 'fastapi' in req_text:
+                for script in ['main.py', 'app.py', 'server.py']:
+                    if script in structure['python_files']:
+                        main_script = script
+                        launch_command = f"uvicorn {script.replace('.py', '')}:app --host 0.0.0.0 --port 8000"
+                        launch_type = "fastapi_app"
+                        confidence = 0.8
+                        break
+            
+            # Flask detection
+            elif 'flask' in req_text:
+                for script in ['app.py', 'main.py', 'server.py']:
+                    if script in structure['python_files']:
+                        main_script = script
+                        launch_command = f"python {script}"
+                        launch_type = "flask_app"
+                        confidence = 0.75
                         break
         
-        # If no priority script found, use first Python file
-        if not main_script and structure['python_files']:
-            main_script = structure['python_files'][0]
-        
-        # Determine launch type based on structure
-        if any('gradio' in req.lower() for req in structure['requirements']):
-            launch_type = "gradio_app"
-        elif any('streamlit' in req.lower() for req in structure['requirements']):
-            launch_type = "streamlit_app"
-        elif any('flask' in req.lower() for req in structure['requirements']):
-            launch_type = "flask_app"
-        elif any('fastapi' in req.lower() for req in structure['requirements']):
-            launch_type = "fastapi_app"
-        elif structure['dockerfile'] or structure['docker_compose']:
-            launch_type = "docker"
-        elif structure['makefile']:
-            launch_type = "makefile"
-        elif structure['scripts']:
-            launch_type = "shell_script"
-            main_script = structure['scripts'][0]
-        
-        # Generate launch command
+        # 3. Docker detection
         if not main_script:
-            launch_command = "echo 'No main script found'"
-            confidence = 0.1
-        elif launch_type == "streamlit_app":
-            launch_command = f"streamlit run {main_script}"
-            confidence = 0.8
-        elif launch_type == "docker":
             if structure['docker_compose']:
+                main_script = "docker-compose.yml"
                 launch_command = "docker-compose up"
-            else:
-                launch_command = "docker build -t project . && docker run -p 8080:8080 project"
-            confidence = 0.7
-        elif launch_type == "makefile":
+                launch_type = "docker_compose"
+                confidence = 0.8
+            elif structure['dockerfile']:
+                main_script = "Dockerfile"
+                launch_command = "docker build -t project . && docker run -it project"
+                launch_type = "docker"
+                confidence = 0.7
+        
+        # 4. Makefile detection
+        if not main_script and structure['makefile']:
+            main_script = "Makefile"
             launch_command = "make run"
-            confidence = 0.6
-        elif launch_type == "shell_script":
-            launch_command = f"bash {main_script}"
-            confidence = 0.6
-        else:
-            launch_command = f"python3 {main_script}"
+            launch_type = "makefile"
             confidence = 0.7
+        
+        # 5. Any other shell scripts
+        if not main_script and structure['executable_scripts']:
+            main_script = structure['executable_scripts'][0]
+            launch_command = f"./{main_script}"
+            launch_type = "shell_script"
+            confidence = 0.6
+        elif not main_script and structure['scripts']:
+            # Try shell scripts even if not marked as executable
+            for script in structure['scripts']:
+                if script.endswith('.sh'):
+                    main_script = script
+                    launch_command = f"./{script}"
+                    launch_type = "shell_script"
+                    confidence = 0.55
+                    break
+        
+        # 6. Python scripts as last resort
+        if not main_script:
+            priority_python_scripts = ['app.py', 'main.py', 'run.py', 'start.py', 'launch.py', 'webui.py', 'server.py']
+            
+            for script in priority_python_scripts:
+                if script in structure['python_files']:
+                    main_script = script
+                    launch_command = f"python {script}"
+                    launch_type = "python_script"
+                    confidence = 0.5
+                    break
+            
+            # Check for nested scripts
+            if not main_script:
+                for py_file in structure['python_files']:
+                    if '/' in py_file:
+                        subdir, filename = py_file.split('/', 1)
+                        if filename in priority_python_scripts:
+                            main_script = py_file
+                            launch_command = f"python {py_file}"
+                            launch_type = "python_script"
+                            confidence = 0.45
+                            break
+            
+            # Use first Python file if nothing else found
+            if not main_script and structure['python_files']:
+                main_script = structure['python_files'][0]
+                launch_command = f"python {main_script}"
+                launch_type = "python_script"
+                confidence = 0.3
+        
+        # Final fallback
+        if not main_script:
+            main_script = "unknown"
+            launch_command = "echo 'No suitable launch method found'"
+            launch_type = "unknown"
+            confidence = 0.1
         
         return {
-            'main_script': main_script or 'unknown',
+            'main_script': main_script,
             'launch_command': launch_command,
             'working_directory': '.',
             'requires_args': '',
             'launch_type': launch_type,
             'description': f"Launch {project_name} using {launch_type}",
             'confidence': confidence,
-            'notes': 'Generated using fallback heuristics',
-            'analysis_method': 'fallback_heuristic',
+            'notes': f'Enhanced fallback heuristics - prioritized {launch_type}',
+            'analysis_method': 'enhanced_fallback_heuristic',
             'model_used': 'none',
             'analyzed_at': time.time()
         }
+
+    def _fallback_analysis(self, structure: Dict, project_path: str, project_name: str, env_type: str, env_name: str) -> Dict:
+        """Legacy fallback analysis - kept for compatibility"""
+        return self._enhanced_fallback_analysis(structure, project_path, project_name, env_type, env_name)
     
     def analyze_complex_project(self, project_path: str, project_name: str) -> Dict:
         """Use the more powerful Qwen model for complex projects"""
@@ -400,3 +775,65 @@ Respond ONLY with valid JSON:"""
         
         # Fallback to regular analysis
         return self.generate_launch_command(project_path, project_name) 
+    
+    def _read_key_files(self, project_path: str, structure: Dict) -> str:
+        """Read key files that might contain launch instructions"""
+        path_obj = Path(project_path)
+        content_parts = []
+        
+        # Read first few lines of shell scripts
+        for script in structure['scripts'][:5]:
+            script_path = path_obj / script
+            if script_path.exists() and script_path.stat().st_size < 10000:
+                try:
+                    with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()[:10]
+                        content_parts.append(f"\n--- {script} (first 10 lines) ---\n{''.join(lines)}")
+                except:
+                    pass
+        
+        # Read package.json scripts section
+        if structure['package_json']:
+            package_json_path = path_obj / 'package.json'
+            try:
+                with open(package_json_path, 'r', encoding='utf-8') as f:
+                    package_data = json.loads(f.read())
+                    if 'scripts' in package_data:
+                        content_parts.append(f"\n--- package.json scripts ---\n{json.dumps(package_data['scripts'], indent=2)}")
+            except:
+                pass
+        
+        # Read Makefile
+        if structure['makefile']:
+            makefile_path = path_obj / 'Makefile'
+            if not makefile_path.exists():
+                makefile_path = path_obj / 'makefile'
+            try:
+                with open(makefile_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()[:15]
+                    content_parts.append(f"\n--- Makefile (first 15 lines) ---\n{''.join(lines)}")
+            except:
+                pass
+        
+        return ''.join(content_parts) if content_parts else "No key files found"
+    
+    def _clean_json_response(self, response: str) -> str:
+        """Clean the AI response to extract valid JSON"""
+        response_clean = response.strip()
+        
+        # Remove common markdown formatting
+        if response_clean.startswith('```json'):
+            response_clean = response_clean[7:]
+        if response_clean.startswith('```'):
+            response_clean = response_clean[3:]
+        if response_clean.endswith('```'):
+            response_clean = response_clean[:-3]
+            
+        # Find JSON object bounds
+        start_idx = response_clean.find('{')
+        end_idx = response_clean.rfind('}') + 1
+        
+        if start_idx >= 0 and end_idx > start_idx:
+            response_clean = response_clean[start_idx:end_idx]
+        
+        return response_clean.strip() 

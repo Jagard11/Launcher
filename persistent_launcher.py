@@ -323,26 +323,44 @@ class PersistentLauncher:
                         <h3 style="margin: 0; font-size: 16px; color: #2c3e50; font-weight: 600; flex: 1;">
                             {str(project.get('name', 'Unknown Project'))}
                         </h3>
-                        <a href="http://localhost:{api_port}/launch?project_id={index}" 
-                           target="_blank" 
-                           style="
-                            background: linear-gradient(135deg, #007bff, #0056b3);
-                            color: white; 
-                            border: none; 
-                            padding: 8px 16px; 
-                            border-radius: 20px; 
-                            cursor: pointer; 
-                            font-size: 12px;
-                            font-weight: 600;
-                            box-shadow: 0 2px 4px rgba(0,123,255,0.3);
-                            transition: all 0.2s ease;
-                            margin-left: 12px;
-                            text-decoration: none;
-                            display: inline-block;
-                        " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,123,255,0.4)'"
-                           onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,123,255,0.3)'">
-                            🚀 Launch
-                        </a>
+                        <div style="display: flex; gap: 8px; margin-left: 12px;">
+                            <button onclick="viewLaunchDetails('{project_path_safe}')" style="
+                                background: linear-gradient(135deg, #28a745, #20c997);
+                                color: white; 
+                                border: none; 
+                                padding: 6px 12px; 
+                                border-radius: 15px; 
+                                cursor: pointer; 
+                                font-size: 11px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 4px rgba(40,167,69,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(40,167,69,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(40,167,69,0.3)'">
+                                🔧 Edit Launch
+                            </button>
+                            <a href="http://localhost:{api_port}/launch?project_id={index}
+                               target="_blank" 
+                               style="
+                                background: linear-gradient(135deg, #007bff, #0056b3);
+                                color: white; 
+                                border: none; 
+                                padding: 6px 12px; 
+                                border-radius: 15px; 
+                                cursor: pointer; 
+                                font-size: 11px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 4px rgba(0,123,255,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,123,255,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,123,255,0.3)'">
+                                🚀 Launch
+                            </a>
+                        </div>
                     </div>
                     <div style="margin-bottom: 8px;">
                         {' '.join(status_badges)}
@@ -591,6 +609,299 @@ class PersistentLauncher:
         
         return f"✅ {project_name} is starting... (Background launch #{launch_id})"
 
+    def get_project_details_with_launch_info(self, project_path: str) -> Dict:
+        """Get detailed project information including launch method analysis"""
+        try:
+            from qwen_launch_analyzer import QwenLaunchAnalyzer
+            
+            # Get project from database
+            project_data = db.get_project_by_path(project_path)
+            if not project_data:
+                return {"error": "Project not found in database"}
+            
+            # Get AI analysis
+            analyzer = QwenLaunchAnalyzer()
+            launch_info = analyzer.get_launch_alternatives_for_ui(project_path, project_data['name'])
+            
+            # Combine all information
+            return {
+                'project': project_data,
+                'launch_info': launch_info,
+                'project_path': project_path
+            }
+        except Exception as e:
+            logger.error(f"Error getting project details: {e}")
+            return {"error": str(e)}
+    
+    def create_launch_details_modal(self, project_data: Dict) -> str:
+        """Create a detailed launch method display with editing capabilities"""
+        if 'error' in project_data:
+            return f"<div class='error'>Error: {project_data['error']}</div>"
+        
+        project = project_data['project']
+        launch_info = project_data['launch_info']
+        project_path = project_data['project_path']
+        
+        # Get current launch command from database
+        current_command = project.get('launch_command', 'Not determined')
+        confidence = launch_info.get('confidence', 0.0)
+        needs_input = launch_info.get('needs_user_input', False)
+        alternatives = launch_info.get('alternatives', [])
+        custom_launcher_path = launch_info.get('custom_launcher_path', '')
+        
+        # Create the modal content
+        modal_html = f"""
+        <div style="
+            background: white; 
+            border: 2px solid #007bff; 
+            border-radius: 12px; 
+            padding: 20px; 
+            margin: 10px 0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        ">
+            <h3 style="color: #2c3e50; margin-top: 0;">🔧 Launch Method for {project['name']}</h3>
+            
+            <div style="margin: 15px 0; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+                <strong>Current Launch Command:</strong><br>
+                <code style="background: #e9ecef; padding: 4px 8px; border-radius: 4px; color: #495057;">
+                    {current_command}
+                </code>
+            </div>
+            
+            <div style="margin: 15px 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <strong>AI Confidence:</strong>
+                    <div style="
+                        background: {'#d4edda' if confidence > 0.7 else '#fff3cd' if confidence > 0.4 else '#f8d7da'};
+                        color: {'#155724' if confidence > 0.7 else '#856404' if confidence > 0.4 else '#721c24'};
+                        padding: 4px 12px;
+                        border-radius: 15px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    ">
+                        {confidence:.1%} {'✅' if confidence > 0.7 else '⚠️' if confidence > 0.4 else '❌'}
+                    </div>
+                </div>
+                <div style="margin-top: 8px; font-size: 14px; color: #6c757d;">
+                    Project Type: {launch_info.get('project_type', 'Unknown')}
+                </div>
+            </div>
+        """
+        
+        # Show alternatives if available
+        if alternatives:
+            modal_html += """
+            <div style="margin: 15px 0;">
+                <strong>Alternative Launch Methods:</strong>
+                <ul style="margin-top: 8px;">
+            """
+            for alt in alternatives:
+                alt_confidence = alt.get('confidence', 0.0)
+                modal_html += f"""
+                <li style="margin: 5px 0;">
+                    <code style="background: #e9ecef; padding: 2px 6px; border-radius: 3px;">
+                        {alt.get('command', 'N/A')}
+                    </code>
+                    <span style="color: #6c757d; font-size: 12px;">
+                        ({alt_confidence:.1%} confidence)
+                    </span>
+                    <br>
+                    <small style="color: #868e96;">{alt.get('reasoning', '')}</small>
+                </li>
+                """
+            modal_html += "</ul></div>"
+        
+        # Show uncertainty notes if available
+        uncertainty = launch_info.get('uncertainty_notes', '')
+        if uncertainty:
+            modal_html += f"""
+            <div style="
+                margin: 15px 0; 
+                padding: 12px; 
+                background: #fff3cd; 
+                border: 1px solid #ffeaa7; 
+                border-radius: 8px;
+                color: #856404;
+            ">
+                <strong>⚠️ AI Notes:</strong><br>
+                {uncertainty}
+            </div>
+            """
+        
+        # Show custom launcher info if available
+        if custom_launcher_path:
+            modal_html += f"""
+            <div style="
+                margin: 15px 0; 
+                padding: 12px; 
+                background: #d1ecf1; 
+                border: 1px solid #bee5eb; 
+                border-radius: 8px;
+                color: #0c5460;
+            ">
+                <strong>🛠️ Custom Launcher Created:</strong><br>
+                Edit the file: <code>{custom_launcher_path}</code><br>
+                <small>This file contains suggested launch commands that you can modify.</small>
+            </div>
+            """
+        
+        # Instructions for manual editing
+        modal_html += f"""
+        <div style="
+            margin: 20px 0; 
+            padding: 15px; 
+            background: #e7f3ff; 
+            border: 1px solid #b3d7ff; 
+            border-radius: 8px;
+        ">
+            <h4 style="color: #004085; margin-top: 0;">📝 Manual Override Options:</h4>
+            
+            <div style="margin: 10px 0;">
+                <button onclick="reanalyzeProject('{project_path}')" style="
+                    background: linear-gradient(135deg, #28a745, #20c997);
+                    color: white; 
+                    border: none; 
+                    padding: 8px 16px; 
+                    border-radius: 20px; 
+                    cursor: pointer; 
+                    font-size: 13px;
+                    font-weight: 600;
+                    margin-right: 10px;
+                    box-shadow: 0 2px 4px rgba(40,167,69,0.3);
+                ">
+                    🔄 Re-analyze with New AI
+                </button>
+                <small style="color: #495057;">Force re-analysis using the latest AI detection system</small>
+            </div>
+            
+            <p style="margin: 8px 0;"><strong>Option 1: Edit Custom Launcher</strong></p>
+            <p style="margin: 8px 0; font-size: 14px; color: #495057;">
+                Create/edit: <code>custom_launchers/{project['name'].replace(' ', '_').replace('-', '_')}.sh</code>
+            </p>
+            
+            <p style="margin: 8px 0;"><strong>Option 2: Database Override</strong></p>
+            <p style="margin: 8px 0; font-size: 14px; color: #495057;">
+                Use the Database tab to directly edit the launch command in the database.
+            </p>
+            
+            <p style="margin: 8px 0;"><strong>Option 3: Project-Level Script</strong></p>
+            <p style="margin: 8px 0; font-size: 14px; color: #495057;">
+                Create a <code>start.sh</code> or <code>launch.sh</code> script in the project directory.
+            </p>
+        </div>
+        """
+        
+        # Analysis details for debugging
+        if launch_info.get('analysis_notes'):
+            modal_html += f"""
+            <details style="margin: 15px 0;">
+                <summary style="cursor: pointer; color: #007bff; font-weight: bold;">
+                    🔍 AI Analysis Details
+                </summary>
+                <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 6px; font-size: 13px; color: #495057;">
+                    {launch_info['analysis_notes']}
+                </div>
+            </details>
+            """
+        
+        modal_html += "</div>"
+        return modal_html
+
+    def rebuild_launch_commands(self) -> str:
+        """Rebuild all launch commands using the new AI detection system"""
+        try:
+            logger.info("Starting launch command rebuild for all projects...")
+            
+            # Get all projects from database
+            all_projects = db.get_all_projects(active_only=False)
+            
+            if not all_projects:
+                return "❌ No projects found in database"
+            
+            # Mark all projects as dirty to force re-analysis
+            rebuild_count = 0
+            for project in all_projects:
+                try:
+                    # Clear existing launch data and mark as dirty
+                    update_data = {
+                        'path': project['path'],
+                        'dirty_flag': 1,  # Mark as needing re-analysis
+                        'launch_command': '',  # Clear old command
+                        'launch_confidence': 0.0,  # Reset confidence
+                        'launch_notes': 'Marked for rebuild with new AI system',
+                        'launch_analysis_method': 'pending_rebuild',
+                        'launch_analyzed_at': time.time()
+                    }
+                    
+                    db.upsert_project(update_data)
+                    rebuild_count += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error marking project for rebuild: {project.get('name', 'Unknown')} - {e}")
+            
+            # Trigger the background scanner to process dirty projects
+            if self.scanner:
+                self.scanner.trigger_dirty_cleanup()
+            
+            logger.info(f"Marked {rebuild_count} projects for launch command rebuild")
+            return f"✅ Marked {rebuild_count} projects for rebuild. Background processing started."
+            
+        except Exception as e:
+            error_msg = f"Error rebuilding launch commands: {str(e)}"
+            logger.error(error_msg)
+            return f"❌ {error_msg}"
+    
+    def force_reanalyze_project(self, project_path: str) -> str:
+        """Force re-analysis of a specific project's launch method"""
+        try:
+            from qwen_launch_analyzer import QwenLaunchAnalyzer
+            
+            # Get project from database
+            project_data = db.get_project_by_path(project_path)
+            if not project_data:
+                return "❌ Project not found in database"
+            
+            # Run new AI analysis
+            analyzer = QwenLaunchAnalyzer()
+            env_detector = EnvironmentDetector()
+            env_info = env_detector.detect_environment(project_path)
+            
+            launch_analysis = analyzer.generate_launch_command(
+                project_path, 
+                project_data['name'], 
+                env_info.get('type', 'none'), 
+                env_info.get('name', '')
+            )
+            
+            # Update database with new analysis
+            update_data = {
+                'path': project_path,
+                'launch_command': launch_analysis.get('launch_command', ''),
+                'launch_type': launch_analysis.get('launch_type', 'unknown'),
+                'launch_working_directory': launch_analysis.get('working_directory', '.'),
+                'launch_args': launch_analysis.get('requires_args', ''),
+                'launch_confidence': launch_analysis.get('confidence', 0.0),
+                'launch_notes': launch_analysis.get('notes', ''),
+                'launch_analysis_method': launch_analysis.get('analysis_method', 'forced_reanalysis'),
+                'main_script': launch_analysis.get('main_script', ''),
+                'dirty_flag': 0,  # Mark as clean since we just analyzed it
+                'launch_analyzed_at': time.time()
+            }
+            
+            db.upsert_project(update_data)
+            
+            # Reload projects to reflect changes
+            self.load_projects_from_db()
+            self.ui_needs_refresh = True
+            
+            logger.info(f"Force re-analyzed project: {project_data['name']}")
+            return f"✅ Re-analyzed {project_data['name']}: {launch_analysis.get('launch_command', 'No command')}"
+            
+        except Exception as e:
+            error_msg = f"Error re-analyzing project: {str(e)}"
+            logger.error(error_msg)
+            return f"❌ {error_msg}"
+
 def load_config():
     """Load configuration from config.json"""
     with open('config.json', 'r') as f:
@@ -751,7 +1062,7 @@ def main(api_port=7871):
         </style>
         """)
         
-        # Sticky search bar with keyboard shortcuts
+        # Sticky search bar with keyboard shortcuts and launch functions
         gr.HTML("""
         <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -776,6 +1087,83 @@ def main(api_port=7871):
                 }
             });
         });
+        
+        // Launch project function for project cards
+        function launchProject(projectName, projectPath) {
+            console.log('🚀 [JS] Launch request:', projectName, 'at', projectPath);
+            
+            // Set hidden inputs
+            const nameInput = document.querySelector('#project_name_data input');
+            const pathInput = document.querySelector('#project_path_data input');
+            const launchBtn = document.querySelector('#launch_trigger');
+            
+            if (nameInput && pathInput && launchBtn) {
+                nameInput.value = projectName;
+                nameInput.dispatchEvent(new Event('input'));
+                
+                pathInput.value = projectPath;
+                pathInput.dispatchEvent(new Event('input'));
+                
+                // Trigger launch after a short delay
+                setTimeout(() => {
+                    launchBtn.click();
+                }, 100);
+            } else {
+                console.error('🚀 [JS] Could not find required elements');
+            }
+        }
+        
+        // View launch details function for project cards
+        function viewLaunchDetails(projectPath) {
+            console.log('🔧 [JS] View launch details request for:', projectPath);
+            
+            // Set the project path for details
+            const pathInput = document.querySelector('#project_path_for_details input');
+            const detailsBtn = document.querySelector('#show_details_trigger');
+            
+            if (pathInput && detailsBtn) {
+                pathInput.value = projectPath;
+                pathInput.dispatchEvent(new Event('input'));
+                
+                // Trigger show details after a short delay
+                setTimeout(() => {
+                    detailsBtn.click();
+                }, 100);
+            } else {
+                console.error('🔧 [JS] Could not find details elements');
+            }
+        }
+        
+        // Re-analyze project function for launch details modal
+        function reanalyzeProject(projectPath) {
+            console.log('🔄 [JS] Re-analyze request for:', projectPath);
+            
+            // Set the project path for re-analysis
+            const pathInput = document.querySelector('#reanalyze_path_input input');
+            
+            if (pathInput) {
+                pathInput.value = projectPath;
+                pathInput.dispatchEvent(new Event('input'));
+                
+                // Find and click the re-analyze button
+                const buttons = document.querySelectorAll('button');
+                for (let btn of buttons) {
+                    if (btn.textContent.includes('Re-analyze Project')) {
+                        setTimeout(() => {
+                            btn.click();
+                        }, 100);
+                        break;
+                    }
+                }
+            } else {
+                console.error('🔄 [JS] Could not find re-analyze elements');
+            }
+        }
+        
+        // Make functions globally available
+        window.launchProject = launchProject;
+        window.viewLaunchDetails = viewLaunchDetails;
+        window.reanalyzeProject = reanalyzeProject;
         </script>
         """)
         
@@ -818,6 +1206,16 @@ def main(api_port=7871):
         with gr.Row():
             launch_output = gr.Textbox(label="Launch Output", interactive=False, elem_id="launch_output")
             project_details = gr.Markdown("Click on a project name to see details")
+        
+        # Launch Method Details Modal
+        with gr.Row():
+            launch_details_modal = gr.HTML("", visible=False, elem_id="launch_details_modal")
+            close_modal_btn = gr.Button("❌ Close Details", visible=False, elem_id="close_modal_btn")
+        
+        # Hidden components for launch details
+        with gr.Row(visible=False):
+            project_path_for_details = gr.Textbox(elem_id="project_path_for_details")
+            show_details_trigger = gr.Button("Show Details", elem_id="show_details_trigger")
         
         # Hidden components for instant launches
         with gr.Row(visible=False):
@@ -880,8 +1278,7 @@ def main(api_port=7871):
         # Advanced controls
         with gr.Accordion("🛠️ Advanced Controls", open=False):
             with gr.Row():
-                view_logs_btn = gr.Button("View Scan History")
-                cleanup_btn = gr.Button("Cleanup Old Data")
+                view_logs_btn = gr.Button("📜 View Scan History")
             
             scan_history = gr.Textbox(label="Recent Scan Sessions", lines=5, interactive=False)
         
@@ -1154,6 +1551,42 @@ def main(api_port=7871):
                 return {};
             }
             """
+        )
+
+        def handle_show_launch_details(project_path):
+            """Handle showing launch details modal"""
+            if not project_path:
+                return gr.update(), gr.update(visible=False), gr.update(visible=False)
+            
+            try:
+                project_details_data = launcher.get_project_details_with_launch_info(project_path)
+                modal_html = launcher.create_launch_details_modal(project_details_data)
+                return modal_html, gr.update(visible=True), gr.update(visible=True)
+            except Exception as e:
+                error_html = f"<div style='color: red; padding: 20px;'>Error loading launch details: {str(e)}</div>"
+                return error_html, gr.update(visible=True), gr.update(visible=True)
+        
+        def handle_close_modal():
+            """Handle closing the launch details modal"""
+            return "", gr.update(visible=False), gr.update(visible=False)
+        
+        # Wire up launch details events
+        show_details_trigger.click(
+            handle_show_launch_details,
+            inputs=[project_path_for_details],
+            outputs=[launch_details_modal, launch_details_modal, close_modal_btn]
+        )
+        
+        close_modal_btn.click(
+            handle_close_modal,
+            outputs=[launch_details_modal, launch_details_modal, close_modal_btn]
+        )
+        
+        # Add project path change handler for details
+        project_path_for_details.change(
+            lambda x: log_input_change(x, "project_path_for_details"),
+            inputs=[project_path_for_details],
+            outputs=[]
         )
     
     return app
