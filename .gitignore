@@ -87,3 +87,4 @@ ollama_cache/
 *.safetensors
 models/
 downloads/ 
+custom_launchers/

@@ -371,21 +371,24 @@ Return ONLY the JSON response, no other text."""
         response = self.call_qwen(self.primary_model, prompt)
         
         if not response:
-            # If AI fails, create a custom launcher template and ask user
-            template_path = self.create_custom_launcher_template(project_path, project_name)
+            # If AI fails, use fallback analysis to create a good custom launcher
+            fallback_analysis = self._enhanced_fallback_analysis(structure, project_path, project_name, env_type, env_name)
+            fallback_command = fallback_analysis.get('launch_command', 'echo "Please edit this script"')
+            
+            template_path = self.create_custom_launcher_template(project_path, project_name, fallback_command)
             return {
-                'main_script': 'unknown',
+                'main_script': fallback_analysis.get('main_script', 'unknown'),
                 'launch_command': f"./custom_launchers/{Path(template_path).name}",
                 'working_directory': '.',
                 'requires_args': '',
                 'launch_type': 'needs_user_input',
-                'description': f"AI analysis failed - please edit {template_path}",
-                'confidence': 0.0,
-                'notes': f'AI analysis unavailable. Custom launcher template created at {template_path}. Please edit it with the correct launch command.',
-                'analysis_method': 'ai_failed_user_template',
+                'description': f"AI analysis failed - using fallback analysis in {template_path}",
+                'confidence': fallback_analysis.get('confidence', 0.1),
+                'notes': f'AI analysis unavailable. Used fallback heuristics. Custom launcher created at {template_path}.',
+                'analysis_method': 'ai_failed_fallback_template',
                 'needs_user_input': True,
                 'custom_launcher_path': template_path,
-                'model_used': 'none',
+                'model_used': 'fallback',
                 'analyzed_at': time.time()
             }
         
@@ -399,23 +402,30 @@ Return ONLY the JSON response, no other text."""
             analysis = result.get('analysis', {})
             alternatives = result.get('alternative_launches', [])
             
-            # Determine if user input is needed
+            # Determine if user input is needed - be less aggressive about this
             needs_user_input = (
                 analysis.get('needs_user_input', False) or
                 analysis.get('missing_launch_method', False) or
-                primary.get('confidence', 0) < 0.5 or
-                len(alternatives) > 1
+                primary.get('confidence', 0) < 0.3  # Only if confidence is very low
+                # Removed: len(alternatives) > 1 - having alternatives is good, not a problem!
             )
             
-            # If user input is needed, create a custom launcher template
+            # ALWAYS create custom launcher files for ALL projects with the best available command
+            # Pick the BEST command from primary or alternatives and implement it directly
+            best_command = primary.get('command', '')
+            
+            # If primary command is weak, check alternatives for a better one
+            if primary.get('confidence', 0) < 0.5 and alternatives:
+                for alt in alternatives:
+                    if alt.get('confidence', 0) > primary.get('confidence', 0):
+                        best_command = alt.get('command', '')
+                        break
+            
+            # Create launcher with the ACTUAL best command for every project
             custom_launcher_path = None
-            if needs_user_input:
-                suggested_commands = [primary.get('command', '')]
-                suggested_commands.extend([alt.get('command', '') for alt in alternatives])
-                suggestions = '\n# '.join([''] + [cmd for cmd in suggested_commands if cmd])
-                
+            if best_command and best_command.strip():
                 custom_launcher_path = self.create_custom_launcher_template(
-                    project_path, project_name, f"# Suggested options:{suggestions}"
+                    project_path, project_name, best_command
                 )
             
             # Build final result
@@ -436,10 +446,14 @@ Return ONLY the JSON response, no other text."""
                 'ai_analysis': analysis
             }
             
+            # We always create custom launchers now, but only point to them if confidence is very low
             if custom_launcher_path:
                 final_result['custom_launcher_path'] = custom_launcher_path
-                final_result['launch_command'] = f"./custom_launchers/{Path(custom_launcher_path).name}"
-                final_result['launch_type'] = 'needs_user_input'
+                # Only use custom launcher path as launch_command if primary confidence is extremely low
+                if primary.get('confidence', 0) < 0.3:
+                    final_result['launch_command'] = f"./custom_launchers/{Path(custom_launcher_path).name}"
+                    final_result['launch_type'] = 'needs_user_input'
+                # Otherwise keep the primary command but note that custom launcher exists as backup
             
             return final_result
             
@@ -690,6 +704,9 @@ Return ONLY the JSON response, no other text."""
             launch_type = "unknown"
             confidence = 0.1
         
+        # Always create custom launcher for fallback analysis too
+        custom_launcher_path = self.create_custom_launcher_template(project_path, project_name, launch_command)
+        
         return {
             'main_script': main_script,
             'launch_command': launch_command,
@@ -701,6 +718,7 @@ Return ONLY the JSON response, no other text."""
             'notes': f'Enhanced fallback heuristics - prioritized {launch_type}',
             'analysis_method': 'enhanced_fallback_heuristic',
             'model_used': 'none',
+            'custom_launcher_path': custom_launcher_path,
             'analyzed_at': time.time()
         }
 

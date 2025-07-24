@@ -259,6 +259,12 @@ class PersistentLauncher:
         last_scanned = project.get('last_scanned', '')
         dirty_flag = project.get('dirty_flag', 1)
         
+        # Check if custom launcher exists
+        project_name = project.get('name', 'Unknown')
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+        custom_launcher_path = Path("custom_launchers") / f"{safe_name}.sh"
+        has_custom_launcher = custom_launcher_path.exists()
+        
         # Format last scanned time
         if last_scanned:
             try:
@@ -282,6 +288,12 @@ class PersistentLauncher:
         if project.get('is_git', False):
             status_badges.append('<span style="background: #339af0; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">GIT</span>')
         
+        # Add custom launcher status badge
+        if has_custom_launcher:
+            status_badges.append('<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">✅ LAUNCHER</span>')
+        else:
+            status_badges.append('<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">❌ NO LAUNCHER</span>')
+        
         # Description handling - ensure we have a valid string
         description = project.get('description') or project.get('tooltip') or 'AI/ML Project'
         if not description or description == 'No description available' or description == 'None':
@@ -300,14 +312,25 @@ class PersistentLauncher:
         project_path_safe = str(project.get('path', '')).replace('\\', '/').replace("'", "&apos;")
         project_name_safe = str(project.get('name', 'Unknown')).replace("'", "&apos;")
 
+        # Conditional styling based on custom launcher availability
+        if has_custom_launcher:
+            card_border = "1px solid #e0e0e0"
+            card_background = "linear-gradient(145deg, #ffffff, #f8f9fa)"
+            card_shadow = "0 2px 8px rgba(0,0,0,0.1)"
+        else:
+            # Red highlighting for missing launcher
+            card_border = "2px solid #dc3545"
+            card_background = "linear-gradient(145deg, #fff5f5, #ffe6e6)"
+            card_shadow = "0 2px 12px rgba(220,53,69,0.25)"
+
         return f"""
         <div class="project-card" id="{card_id}" style="
-            border: 1px solid #e0e0e0; 
+            border: {card_border}; 
             border-radius: 12px; 
             padding: 16px; 
             margin: 8px;
-            background: linear-gradient(145deg, #ffffff, #f8f9fa);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            background: {card_background};
+            box-shadow: {card_shadow};
             transition: all 0.2s ease;
             position: relative;
         ">
@@ -341,7 +364,7 @@ class PersistentLauncher:
                                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(40,167,69,0.3)'">
                                 🔧 Edit Launch
                             </button>
-                            <a href="http://localhost:{api_port}/launch?project_id={index}
+                            <a href="http://localhost:{api_port}/launch?project_id={index}" 
                                target="_blank" 
                                style="
                                 background: linear-gradient(135deg, #007bff, #0056b3);

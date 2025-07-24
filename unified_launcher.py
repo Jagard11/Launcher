@@ -266,19 +266,200 @@ def main():
             if not args.verbose:
                 print("Use --verbose for more details")
     
-    # Create the main interface with tabs
+    # Create the main interface with custom tab buttons for URL routing
     with gr.Blocks(title="🚀 AI Project Launcher", theme=gr.themes.Soft()) as app:
+        # State management for URL routing
+        current_main_tab = gr.State(value="app_list")
+        current_subtab = gr.State(value="query")
+        
         gr.Markdown("# 🚀 AI Project Launcher")
         gr.Markdown("Unified interface for discovering, managing, and launching your AI projects")
         
-        with gr.Tabs():
-            # App List tab (default)
-            with gr.Tab("App List", id="app_list") as app_list_tab:
-                launcher.build_app_list_tab(args.api_port)
-            
-            # Database tab
-            with gr.Tab("Database", id="database") as database_tab:
-                build_database_ui(launcher=launcher.persistent_launcher)
+        # Main tab buttons
+        with gr.Row():
+            app_list_btn = gr.Button("App List", variant="primary", size="lg")
+            database_btn = gr.Button("Database", variant="secondary", size="lg")
+        
+        # Content areas
+        with gr.Column(visible=True) as app_list_content:
+            launcher.build_app_list_tab(args.api_port)
+        
+        with gr.Column(visible=False) as database_content:
+            build_database_ui(launcher=launcher.persistent_launcher)
+        
+        # Tab switching functions
+        def switch_to_app_list():
+            return (
+                "app_list",  # current_main_tab
+                "",  # current_subtab  
+                gr.update(variant="primary"),  # app_list_btn
+                gr.update(variant="secondary"),  # database_btn
+                gr.update(visible=True),  # app_list_content
+                gr.update(visible=False),  # database_content
+            )
+        
+        def switch_to_database():
+            return (
+                "database",  # current_main_tab
+                "query",  # current_subtab
+                gr.update(variant="secondary"),  # app_list_btn
+                gr.update(variant="primary"),  # database_btn
+                gr.update(visible=False),  # app_list_content
+                gr.update(visible=True),  # database_content
+            )
+        
+        # Wire up main tab buttons
+        app_list_btn.click(
+            fn=switch_to_app_list,
+            outputs=[
+                current_main_tab, current_subtab,
+                app_list_btn, database_btn,
+                app_list_content, database_content
+            ]
+        )
+        
+        database_btn.click(
+            fn=switch_to_database,
+            outputs=[
+                current_main_tab, current_subtab,
+                app_list_btn, database_btn,
+                app_list_content, database_content
+            ]
+        )
+        
+        # JavaScript for URL management
+        app.load(
+            fn=None,
+            inputs=[],
+            outputs=[],
+            js="""
+            function() {
+                console.log('🚀 Unified Launcher URL Router: Initializing...');
+                
+                // Function to update URL
+                function updateURL(tab, subtab = '') {
+                    const url = new URL(window.location);
+                    url.searchParams.set('tab', tab);
+                    
+                    if (subtab && subtab !== '') {
+                        url.searchParams.set('subtab', subtab);
+                    } else {
+                        url.searchParams.delete('subtab');
+                    }
+                    
+                    window.history.pushState({tab: tab, subtab: subtab}, '', url);
+                    console.log('🔗 URL updated:', url.href);
+                }
+                
+                // Function to activate tab from URL on page load
+                function activateTabFromURL() {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const requestedTab = urlParams.get('tab') || 'app_list';
+                    const requestedSubtab = urlParams.get('subtab') || 'query';
+                    
+                    console.log(`📍 Activating from URL: tab=${requestedTab}, subtab=${requestedSubtab}`);
+                    
+                    // Find and click the appropriate main tab button
+                    setTimeout(() => {
+                        const buttons = document.querySelectorAll('button');
+                        
+                        for (const button of buttons) {
+                            const buttonText = button.textContent.toLowerCase().trim();
+                            
+                            if ((requestedTab === 'app_list' && buttonText === 'app list') ||
+                                (requestedTab === 'database' && buttonText === 'database')) {
+                                console.log(`🎯 Clicking main tab: ${button.textContent}`);
+                                button.click();
+                                
+                                // If database tab, also click subtab
+                                if (requestedTab === 'database') {
+                                    setTimeout(() => {
+                                        activateSubtab(requestedSubtab);
+                                    }, 300);
+                                }
+                                break;
+                            }
+                        }
+                    }, 500);
+                }
+                
+                // Function to activate subtab
+                function activateSubtab(requestedSubtab) {
+                    console.log(`🎯 Looking for subtab: ${requestedSubtab}`);
+                    
+                    const buttons = document.querySelectorAll('button');
+                    
+                    for (const button of buttons) {
+                        const buttonText = button.textContent.toLowerCase().replace(/[🔍📋📊🛠️]/g, '').trim();
+                        
+                        if ((requestedSubtab === 'query' && buttonText === 'query') ||
+                            (requestedSubtab === 'schema' && buttonText === 'schema') ||
+                            (requestedSubtab === 'statistics' && buttonText === 'statistics') ||
+                            (requestedSubtab === 'tools' && buttonText === 'tools')) {
+                            console.log(`🎯 Clicking subtab: ${button.textContent}`);
+                            button.click();
+                            break;
+                        }
+                    }
+                }
+                
+                // Monitor button clicks to update URL
+                function setupButtonMonitoring() {
+                    const observer = new MutationObserver((mutations) => {
+                        mutations.forEach((mutation) => {
+                            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                                const button = mutation.target;
+                                
+                                if (button.tagName === 'BUTTON' && button.classList.contains('primary')) {
+                                    const buttonText = button.textContent.toLowerCase().trim();
+                                    console.log(`👆 Button activated: ${button.textContent}`);
+                                    
+                                    // Main tab buttons
+                                    if (buttonText === 'app list') {
+                                        updateURL('app_list');
+                                    } else if (buttonText === 'database') {
+                                        updateURL('database', 'query');
+                                    }
+                                    // Subtab buttons
+                                    else if (buttonText.includes('query')) {
+                                        updateURL('database', 'query');
+                                    } else if (buttonText.includes('schema')) {
+                                        updateURL('database', 'schema');
+                                    } else if (buttonText.includes('statistics')) {
+                                        updateURL('database', 'statistics');
+                                    } else if (buttonText.includes('tools')) {
+                                        updateURL('database', 'tools');
+                                    }
+                                }
+                            }
+                        });
+                    });
+                    
+                    observer.observe(document.body, {
+                        attributes: true,
+                        subtree: true,
+                        attributeFilter: ['class']
+                    });
+                    
+                    console.log('📊 Button monitoring active');
+                }
+                
+                // Handle browser back/forward
+                window.addEventListener('popstate', (event) => {
+                    console.log('⬅️ Browser navigation detected');
+                    activateTabFromURL();
+                });
+                
+                // Initialize
+                setTimeout(() => {
+                    setupButtonMonitoring();
+                    activateTabFromURL();
+                }, 1000);
+                
+                return [];
+            }
+            """
+        )
     
     print("🚀 =================================")
     print("🚀 Unified AI Project Launcher")
