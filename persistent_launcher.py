@@ -128,6 +128,63 @@ class PersistentLauncher:
         except Exception as e:
             logger.error(f"Error handling scanner update: {e}")
     
+    def _create_expandable_description(self, description: str) -> str:
+        """Create an expandable description using HTML5 details/summary elements"""
+        # Ensure description is always a string
+        description = str(description or 'AI/ML Project')
+        
+        # Define truncation length for consistent card heights
+        TRUNCATE_LENGTH = 150
+        
+        if not description or len(description.strip()) <= TRUNCATE_LENGTH:
+            # Short descriptions don't need expansion
+            return f'<div style="color: #2c3e50 !important; line-height: 1.4;">{description}</div>'
+        
+        # Create truncated preview (first ~150 characters, cut at word boundary)
+        truncated = description[:TRUNCATE_LENGTH]
+        # Find the last space to avoid cutting words
+        last_space = truncated.rfind(' ')
+        if last_space > TRUNCATE_LENGTH * 0.8:  # Only cut at word boundary if it's not too short
+            truncated = truncated[:last_space]
+        
+        preview_text = truncated.strip() + "..."
+        
+        return f"""
+        <details style="color: #2c3e50 !important; line-height: 1.4; margin: 0;">
+            <summary style="
+                cursor: pointer;
+                color: #2c3e50 !important;
+                font-weight: normal;
+                list-style: none;
+                outline: none;
+                user-select: none;
+                padding: 2px 0;
+                margin: 0;
+                position: relative;
+                display: block;
+            ">
+                <span style="color: #2c3e50 !important;">{preview_text}</span>
+                <span style="
+                    color: #007bff !important;
+                    font-size: 11px;
+                    text-decoration: underline;
+                    margin-left: 8px;
+                    font-weight: normal;
+                "> ▼ Show full description</span>
+            </summary>
+            <div style="
+                color: #2c3e50 !important;
+                margin-top: 6px;
+                line-height: 1.4;
+                padding: 8px 0;
+                border-top: 1px solid #e0e0e0;
+                background: #f9f9f9;
+                padding: 8px 12px;
+                border-radius: 6px;
+            ">{description}</div>
+        </details>
+        """
+    
     def create_project_card(self, project: Dict, index: int) -> str:
         """Create HTML for a single project card"""
         # Get status indicators
@@ -176,7 +233,7 @@ class PersistentLauncher:
         # Escape project path for JavaScript - avoid backslashes in f-strings
         project_path_safe = str(project.get('path', '')).replace('\\', '/').replace("'", "&apos;")
         project_name_safe = str(project.get('name', 'Unknown')).replace("'", "&apos;")
-        
+
         return f"""
         <div class="project-card" id="{card_id}" style="
             border: 1px solid #e0e0e0; 
@@ -220,31 +277,11 @@ class PersistentLauncher:
                     <div style="margin-bottom: 8px;">
                         {' '.join(status_badges)}
                     </div>
-                    <div id="{desc_id}" style="
+                    <div style="
                         font-size: 12px; color: #2c3e50 !important; margin: 0 0 8px 0; 
                         line-height: 1.4;
                     ">
-                        <div id="{desc_id}_text" style="
-                            overflow: hidden;
-                            display: -webkit-box;
-                            -webkit-line-clamp: 3;
-                            -webkit-box-orient: vertical;
-                            line-height: 1.4;
-                            color: #2c3e50 !important;
-                        ">
-                            {description}
-                        </div>
-                        <button id="{btn_id}" onclick="toggleDesc('{desc_id}')" style="
-                            background: none; 
-                            border: none; 
-                            color: #007bff; 
-                            cursor: pointer; 
-                            font-size: 11px; 
-                            text-decoration: underline; 
-                            padding: 0; 
-                            margin-top: 4px;
-                            display: {'block' if len(description) > 200 else 'none'};
-                        ">Show more</button>
+                        {self._create_expandable_description(description)}
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #868e96;">
                         <span>🐍 {env_type} • 📝 {main_script}</span>
@@ -365,51 +402,7 @@ class PersistentLauncher:
             return false;
                 }
         
-        function toggleDesc(descId) {
-            console.log('🔄 [TOGGLE] toggleDesc called with descId:', descId);
-            
-            const textDiv = document.getElementById(descId + '_text');
-            const btnId = descId.replace('desc_', 'btn_');
-            const button = document.getElementById(btnId);
-            
-            console.log('🔄 [TOGGLE] Elements found:', {
-                textDiv: !!textDiv,
-                button: !!button,
-                textDivId: descId + '_text',
-                buttonId: btnId
-            });
-            
-            if (textDiv && button) {
-                const currentClamp = textDiv.style.webkitLineClamp || window.getComputedStyle(textDiv).webkitLineClamp;
-                const isExpanded = currentClamp === 'none' || currentClamp === '';
-                
-                console.log('🔄 [TOGGLE] Current state:', {
-                    currentClamp: currentClamp,
-                    isExpanded: isExpanded,
-                    currentButtonText: button.textContent
-                });
-                
-                if (isExpanded) {
-                    // Currently expanded, collapse it
-                    textDiv.style.overflow = 'hidden';
-                    textDiv.style.display = '-webkit-box';
-                    textDiv.style.webkitLineClamp = '3';
-                    textDiv.style.webkitBoxOrient = 'vertical';
-                    button.textContent = 'Show more';
-                    console.log('🔄 [TOGGLE] Collapsed description');
-                } else {
-                    // Currently collapsed, expand it
-                    textDiv.style.overflow = 'visible';
-                    textDiv.style.display = 'block';
-                    textDiv.style.webkitLineClamp = 'none';
-                    textDiv.style.webkitBoxOrient = 'unset';
-                    button.textContent = 'Show less';
-                    console.log('🔄 [TOGGLE] Expanded description');
-                }
-            } else {
-                console.error('🔄 [TOGGLE] ERROR: Could not find required elements');
-            }
-        }
+
         </script>
         """
         
@@ -633,6 +626,23 @@ def main():
             font-size: 14px !important;
             transition: all 0.3s ease !important;
             cursor: pointer !important;
+        }
+        
+        /* Force text colors to be visible regardless of theme */
+        .project-card * {
+            color: #2c3e50 !important;
+        }
+        .project-card h3 {
+            color: #2c3e50 !important;
+        }
+        .project-card details, .project-card summary, .project-card span, .project-card div:not(.project-card) {
+            color: #2c3e50 !important;
+        }
+        .project-card details summary span:last-child {
+            color: #007bff !important;
+        }
+        .project-card details[open] summary span:last-child {
+            color: #007bff !important;
         }
         #clear_search:hover {
             background: #c82333 !important;
