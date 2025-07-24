@@ -30,7 +30,7 @@ A sophisticated Gradio-based application that automatically discovers, categoriz
 - **User Override**: Easy custom launcher editing with template generation
 
 ### Unified Interface
-- **Multiple Launch Modes**: Choose between persistent, enhanced, or database-focused interfaces
+- **Tabbed Interface**: Integrated App List, Database Management, and Settings in one application
 - **API Integration**: Full RESTful API for programmatic access
 - **Database UI**: Comprehensive project database management and visualization
 - **Command Line Options**: Flexible startup configuration with verbose logging
@@ -45,10 +45,11 @@ A sophisticated Gradio-based application that automatically discovers, categoriz
 
 The application uses a modular architecture with clear separation of concerns:
 
-- **`launcher.py`** - Main launcher with full database integration, AI features, and unified interface
-- **`qwen_launch_analyzer.py`** - **NEW**: AI-powered launch command generation using Qwen models
-- **`database_ui.py`** - **NEW**: Comprehensive database management interface
-- **`launch_api_server.py`** - **NEW**: RESTful API server for external integrations
+- **`launcher.py`** - Main unified launcher with database integration, AI features, and tabbed interface
+- **`qwen_launch_analyzer.py`** - AI-powered launch command generation using Qwen models
+- **`database_ui.py`** - Comprehensive database management interface
+- **`launch_api_server.py`** - RESTful API server for external integrations
+- **`settings_ui.py`** - Settings configuration interface
 - **`project_database.py`** - SQLite database management and operations
 - **`background_scanner.py`** - Background scanning and incremental updates
 - **`launcher_ui.py`** - Core UI components and project management logic
@@ -57,8 +58,7 @@ The application uses a modular architecture with clear separation of concerns:
 - **`ollama_summarizer.py`** - AI-powered project descriptions (Granite models)
 - **`icon_generator.py`** - Visual icon generation
 - **`logger.py`** - Comprehensive logging system
-- **`enhanced_launcher.py`** - Legacy enhanced launcher (for comparison)
-- **`app.py`** - Legacy simple launcher (for comparison)
+- **`launch.py`** - Launch utilities and fallback methods
 
 ## 📋 Requirements
 
@@ -86,7 +86,7 @@ pandas>=1.3.0
 1. **Clone and Setup**
    ```bash
    git clone <repository-url>
-   cd ai-launcher
+   cd Launcher
    pip install -r requirements.txt
    ```
 
@@ -117,28 +117,34 @@ pandas>=1.3.0
    ./launcher.sh
    ```
    
-   Or choose your interface:
+   Or run directly with options:
    ```bash
-python3 launcher.py                    # Default: Main launcher
-python3 launcher.py --mode database    # Database management UI
-python3 launcher.py --mode api         # API server only
-python3 launcher.py --verbose          # Verbose logging
-```
+   python3 launcher.py                    # Default: Unified interface on port 7870
+   python3 launcher.py --port 8080        # Custom port
+   python3 launcher.py --verbose          # Verbose logging
+   python3 launcher.py --no-api           # Disable API server
+   ```
 
 5. **Access the Interface**
-   - **Persistent Launcher**: http://localhost:7862
-   - **Database UI**: http://localhost:7863
-   - **API Server**: http://localhost:7864
-   - **Enhanced Launcher**: http://localhost:7861 (legacy)
+   - **Main Interface**: http://localhost:7870 (App List, Database, Settings tabs)
+   - **API Server**: http://localhost:7871 (if enabled)
 
 ## 🎯 Usage
 
 ### First Run Experience
-1. **Initial Discovery**: Comprehensive scan of your configured directories
-2. **Database Creation**: Creates `projects.db` with all discovered projects
-3. **AI Analysis**: Both Qwen and Granite models analyze projects in the background
-4. **Custom Launcher Generation**: AI creates custom launcher scripts for each project
-5. **Immediate Use**: Projects are immediately launchable with AI-generated commands
+1. **Configuration**: Configure directories in the Settings tab if not done during setup
+2. **Initial Discovery**: Comprehensive scan of your configured directories
+3. **Database Creation**: Creates `projects.db` with all discovered projects
+4. **AI Analysis**: Both Qwen and Granite models analyze projects in the background
+5. **Custom Launcher Generation**: AI creates custom launcher scripts for each project
+6. **Immediate Use**: Projects are immediately launchable with AI-generated commands
+
+### Interface Navigation
+The unified interface provides three main tabs:
+
+- **📱 App List**: Browse and launch your projects with search and filtering
+- **🗄️ Database**: Comprehensive database management and inspection tools  
+- **⚙️ Settings**: Configure directories, manage settings, and view system status
 
 ### AI Launch Command Generation
 The system uses Qwen models to intelligently analyze each project:
@@ -172,7 +178,7 @@ Create `config.json` in the project root:
 {
   "index_directories": [
     "/media/user/AI/projects",
-    "/home/user/git/ai-projects",
+    "/home/user/git/ai-projects", 
     "/opt/ml-projects"
   ]
 }
@@ -199,14 +205,13 @@ The system automatically uses available models:
 ## 🛠️ Advanced Features
 
 ### API Server
-```bash
-# Start API server
-python3 launcher.py --mode api
+The integrated API server runs on port 7871 by default:
 
+```bash
 # Example API calls
-curl http://localhost:7864/api/projects                    # List all projects
-curl http://localhost:7864/api/projects/scan               # Trigger scan
-curl -X POST http://localhost:7864/api/projects/launch \
+curl http://localhost:7871/api/projects                    # List all projects
+curl http://localhost:7871/api/projects/scan               # Trigger scan
+curl -X POST http://localhost:7871/api/projects/launch \
   -H "Content-Type: application/json" \
   -d '{"project_path": "/path/to/project"}'               # Launch project
 ```
@@ -252,7 +257,6 @@ nano custom_launchers/my-project.sh
 ### Component Testing
 ```bash
 # Test Qwen launch analyzer (if available)
-# Note: test files are excluded from git for privacy
 python3 -c "from qwen_launch_analyzer import QwenLaunchAnalyzer; print('OK')"
 
 # Test database operations
@@ -282,11 +286,12 @@ sqlite3 projects.db "SELECT name, launch_analysis_method, launch_confidence FROM
 ## 📁 Project Structure
 
 ```
-ai-launcher/
-├── launcher.py                   # Main launcher with full AI features and unified interface
-├── qwen_launch_analyzer.py       # NEW: AI launch command generation
-├── database_ui.py               # NEW: Database management interface
-├── launch_api_server.py          # NEW: RESTful API server
+Launcher/
+├── launcher.py                   # Main unified launcher (App List + Database + Settings)
+├── qwen_launch_analyzer.py       # AI launch command generation
+├── database_ui.py               # Database management interface
+├── launch_api_server.py          # RESTful API server
+├── settings_ui.py               # Settings configuration interface
 ├── project_database.py          # Database management and operations
 ├── background_scanner.py         # Background scanning and updates
 ├── launcher_ui.py               # Core UI components
@@ -296,8 +301,6 @@ ai-launcher/
 ├── icon_generator.py            # Icon generation
 ├── logger.py                    # Comprehensive logging
 ├── launch.py                    # Launch utilities
-├── enhanced_launcher.py         # Legacy enhanced version
-├── app.py                       # Legacy simple launcher
 ├── launcher.sh                  # Launch script
 ├── config.json                  # Configuration (git-ignored)
 ├── requirements.txt             # Python dependencies
@@ -341,19 +344,27 @@ The launcher automatically:
 - **Handles Complex Projects**: Supports nested structures and frameworks
 - **Creates Custom Scripts**: Generates bash scripts for complex setups
 
-## 🚀 Interface Comparison
+## 🚀 Application Modes
 
-| Feature | Legacy (`app.py`) | Enhanced (`enhanced_launcher.py`) | **Main Launcher (`launcher.py`)** |
-|---------|------------------|-----------------------------------|-------------------------------------------|-------------------------------------|
-| AI Launch Commands | None | None | **Qwen-powered** | **Qwen-powered** |
-| Project Discovery | Manual scan | Manual/Auto scan | **Background + Manual** | **Background + Manual** |
-| Database Storage | None | None | **SQLite with history** | **SQLite with history** |
-| Custom Launchers | None | None | **Auto-generated** | **Auto-generated** |
-| API Server | None | None | Optional | **Integrated** |
-| Database UI | None | None | Separate | **Integrated** |
-| Multiple Interfaces | No | No | No | **Yes** |
-| Session Persistence | None | None | **Full persistence** | **Full persistence** |
-| Port | 7860 | 7861 | 7862 | **7862-7864** |
+The unified launcher provides a single interface with multiple tabs:
+
+| Interface Component | Port | Description |
+|-------------------|------|-------------|
+| **Main Interface** | 7870 | Unified tabbed interface (App List + Database + Settings) |
+| **API Server** | 7871 | RESTful API for external integrations |
+
+### Interface Features Comparison
+
+| Feature | Simple Launch (`launch.py`) | **Unified Launcher (`launcher.py`)** |
+|---------|---------------------------|---------------------------------------|
+| AI Launch Commands | Fallback only | **Qwen-powered** |
+| Project Discovery | Manual scan | **Background + Manual** |
+| Database Storage | None | **SQLite with history** |
+| Custom Launchers | None | **Auto-generated** |
+| API Server | None | **Integrated** |
+| Multiple Interfaces | No | **Tabbed (App List + Database + Settings)** |
+| Session Persistence | None | **Full persistence** |
+| Port | 7860 | **7870-7871** |
 
 ## 🐛 Troubleshooting
 
