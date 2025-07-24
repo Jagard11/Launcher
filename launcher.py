@@ -761,38 +761,34 @@ class UnifiedLauncher:
                 color: var(--text-primary) !important;
                 border-color: var(--accent-red) !important;
             }
-            .sort-label-compact {
-                color: var(--text-secondary) !important;
-                font-weight: 500 !important;
+            .sort-controls-inline {
+                display: flex !important;
+                align-items: end !important;
+                justify-content: flex-end !important;
+                gap: 12px !important;
+                margin-top: 0 !important;
+            }
+            .sort-dropdown-inline {
+                margin-bottom: 0 !important;
+            }
+            .sort-dropdown-inline label {
                 font-size: 12px !important;
-                margin: 0 6px 0 0 !important;
-                display: flex !important;
-                align-items: center !important;
-                justify-content: flex-end !important;
+                font-weight: 500 !important;
+                color: var(--text-secondary) !important;
+                margin-bottom: 4px !important;
                 white-space: nowrap !important;
-                min-width: fit-content !important;
-                height: 32px !important;
             }
-            .sort-controls {
-                display: flex !important;
-                align-items: center !important;
-                justify-content: flex-end !important;
-                gap: 4px !important;
-                height: 32px !important;
-            }
-            .sort-dropdown-compact {
+            .sort-dropdown-inline .wrap {
                 min-height: 32px !important;
                 height: 32px !important;
+                margin-bottom: 0 !important;
             }
-            .sort-dropdown-compact .wrap {
-                min-height: 32px !important;
-                height: 32px !important;
-            }
-            .sort-dropdown-compact select {
+            .sort-dropdown-inline select, .sort-dropdown-inline .svelte-1gfkn6j {
                 min-height: 28px !important;
                 height: 28px !important;
                 padding: 4px 8px !important;
                 font-size: 12px !important;
+                border-radius: 4px !important;
             }
             /* Project cards - styled in main launcher */
             </style>
@@ -814,9 +810,9 @@ class UnifiedLauncher:
                         refresh_btn = gr.Button("♻️ Refresh", size="sm")
                 
                 with gr.Column(scale=3):
-                    with gr.Row(elem_classes="sort-controls"):
-                        gr.Markdown("**Sort By:**", elem_classes="sort-label-compact")
+                    with gr.Row(elem_classes="sort-controls-inline"):
                         sort_by_dropdown = gr.Dropdown(
+                            label="Sort By",
                             choices=[
                                 ("Project Name", "name"),
                                 ("Directory Path", "directory"), 
@@ -825,20 +821,18 @@ class UnifiedLauncher:
                                 ("Project Size", "size")
                             ],
                             value=self.config.get('sort_preference', 'name'),
-                            show_label=False,
                             scale=2,
-                            elem_classes="sort-dropdown-compact"
+                            elem_classes="sort-dropdown-inline"
                         )
-                        gr.Markdown("**Order:**", elem_classes="sort-label-compact")
                         sort_direction_dropdown = gr.Dropdown(
+                            label="Order",
                             choices=[
                                 ("A-Z", "asc"),
                                 ("Z-A", "desc")
                             ],
                             value=self.config.get('sort_direction', 'asc'),
-                            show_label=False,
                             scale=1,
-                            elem_classes="sort-dropdown-compact"
+                            elem_classes="sort-dropdown-inline"
                         )
             
             # Projects display
