@@ -126,6 +126,10 @@ class UnifiedLauncher:
                 project_name_input = gr.Textbox(elem_id="project_name_data")
                 project_path_input = gr.Textbox(elem_id="project_path_data")
                 launch_trigger = gr.Button("Launch", elem_id="launch_trigger")
+                
+            # Hidden refresh button for JavaScript to trigger automatic refresh
+            with gr.Row(visible=False):
+                hidden_refresh_trigger = gr.Button("Hidden Refresh", elem_id="hidden_refresh_trigger")
             
             # Event handlers (simplified)
             def handle_search(query):
@@ -185,6 +189,12 @@ class UnifiedLauncher:
                 outputs=[status_display, projects_display]
             )
             
+            # Wire up hidden refresh trigger for automatic refresh from JavaScript
+            hidden_refresh_trigger.click(
+                handle_refresh,
+                outputs=[status_display, projects_display]
+            )
+            
             launch_trigger.click(
                 handle_launch,
                 inputs=[project_name_input, project_path_input],
@@ -198,6 +208,9 @@ class UnifiedLauncher:
             console.log('🚀 [JS] App list tab JavaScript loaded');
             </script>
             """)
+            
+            # Return projects_display so it can be accessed by global search handlers
+            return projects_display
 
 def main():
     """Main application entry point with argument parsing"""
@@ -554,10 +567,11 @@ def main():
             # Content areas
             with gr.Column(visible=(default_tab == "app_list")) as app_list_content:
                 if config.get('index_directories'):
-                    launcher.build_app_list_tab(args.api_port)
+                    projects_display = launcher.build_app_list_tab(args.api_port)
                 else:
                     gr.Markdown("### 📁 No Directories Configured")
                     gr.Markdown("Please configure directories to index in the **Settings** tab before using the launcher.")
+                    projects_display = None
             
             with gr.Column(visible=False) as database_content:
                 build_database_ui(launcher=launcher.persistent_launcher)
@@ -727,12 +741,12 @@ def main():
         fixed_search_input.change(
             handle_fixed_search,
             inputs=[fixed_search_input],
-            outputs=[projects_display] if 'projects_display' in locals() else []
+            outputs=[projects_display] if projects_display else []
         )
         
         fixed_clear_search_btn.click(
             clear_fixed_search,
-            outputs=[fixed_search_input, projects_display] if 'projects_display' in locals() else [fixed_search_input]
+            outputs=[fixed_search_input, projects_display] if projects_display else [fixed_search_input]
         )
         
         # JavaScript for URL management
@@ -746,6 +760,40 @@ def main():
                 
                 // Make API port available globally first
                 window.api_port = {args.api_port};
+                
+                // Global refresh function - accessible from anywhere
+                window.refreshProjects = function() {{
+                    console.log('🔄 [GLOBAL] Refreshing projects...');
+                    
+                    // Try multiple methods to find and trigger refresh
+                    let refreshTriggered = false;
+                    
+                    // Method 1: Try hidden refresh trigger
+                    const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
+                    if (hiddenRefreshBtn) {{
+                        hiddenRefreshBtn.click();
+                        console.log('🔄 [GLOBAL] Used hidden refresh trigger');
+                        refreshTriggered = true;
+                    }}
+                    
+                    // Method 2: Try main refresh button
+                    if (!refreshTriggered) {{
+                        const mainRefreshBtn = document.querySelector('button[aria-label*="Refresh"]') || 
+                                              Array.from(document.querySelectorAll('button')).find(btn => 
+                                                  btn.textContent.includes('♻️') || btn.textContent.includes('Refresh'));
+                        if (mainRefreshBtn) {{
+                            mainRefreshBtn.click();
+                            console.log('🔄 [GLOBAL] Used main refresh button');
+                            refreshTriggered = true;
+                        }}
+                    }}
+                    
+                    if (!refreshTriggered) {{
+                        console.warn('🔄 [GLOBAL] No refresh method found');
+                    }}
+                    
+                    return refreshTriggered;
+                }};
                 
                 // Define global functions for favorite/hide functionality
                 window.toggleFavorite = function(projectPath) {{
@@ -782,16 +830,20 @@ def main():
                             pathInput.dispatchEvent(new Event('input'));
                             pathInput.dispatchEvent(new Event('change'));
                             
-                            // Trigger the hidden button and refresh after completion
+                            // Trigger the toggle button
                             setTimeout(() => {{
                                 console.log('🌟 [JS] Clicking trigger button...');
                                 triggerBtn.click();
                                 
                                 // Wait a moment for the API call to complete, then refresh
                                 setTimeout(() => {{
-                                    console.log('🌟 [JS] Refreshing page after favorite toggle');
-                                    window.location.reload();
-                                }}, 1000);
+                                    console.log('🌟 [JS] Calling global refresh...');
+                                    if (window.refreshProjects) {{
+                                        window.refreshProjects();
+                                    }} else {{
+                                        console.warn('🌟 [JS] Global refresh function not available');
+                                    }}
+                                }}, 500);
                             }}, 100);
                             
                             return true;
@@ -854,16 +906,20 @@ def main():
                             pathInput.dispatchEvent(new Event('input'));
                             pathInput.dispatchEvent(new Event('change'));
                             
-                            // Trigger the hidden button and refresh after completion
+                            // Trigger the toggle button
                             setTimeout(() => {{
                                 console.log('👻 [JS] Clicking trigger button...');
                                 triggerBtn.click();
                                 
                                 // Wait a moment for the API call to complete, then refresh
                                 setTimeout(() => {{
-                                    console.log('👻 [JS] Refreshing page after hidden toggle');
-                                    window.location.reload();
-                                }}, 1000);
+                                    console.log('👻 [JS] Calling global refresh...');
+                                    if (window.refreshProjects) {{
+                                        window.refreshProjects();
+                                    }} else {{
+                                        console.warn('👻 [JS] Global refresh function not available');
+                                    }}
+                                }}, 500);
                             }}, 100);
                             
                             return true;

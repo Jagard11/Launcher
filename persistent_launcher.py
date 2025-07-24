@@ -579,16 +579,19 @@ class PersistentLauncher:
                  if (data.success) {{
                      console.log('🌟 [JS] Successfully toggled favorite, triggering refresh...');
                      
-                     // Trigger the hidden refresh button
-                     const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
-                     if (hiddenRefreshBtn) {{
-                         hiddenRefreshBtn.click();
-                         console.log('🌟 [JS] Triggered hidden refresh');
+                     // Use global refresh function if available
+                     if (window.refreshProjects) {{
+                         console.log('🌟 [JS] Using global refresh function');
+                         window.refreshProjects();
                      }} else {{
-                         console.log('🌟 [JS] Hidden refresh button not found, using page reload');
-                         setTimeout(() => {{
-                             window.location.reload();
-                         }}, 500);
+                         console.log('🌟 [JS] Global refresh not available, trying hidden refresh button');
+                         const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
+                         if (hiddenRefreshBtn) {{
+                             hiddenRefreshBtn.click();
+                             console.log('🌟 [JS] Triggered hidden refresh');
+                         }} else {{
+                             console.log('🌟 [JS] No refresh method available');
+                         }}
                      }}
                  }} else {{
                      console.error('Failed to toggle favorite:', data.error);
@@ -620,16 +623,19 @@ class PersistentLauncher:
                  if (data.success) {{
                      console.log('👻 [JS] Successfully toggled hidden, triggering refresh...');
                      
-                     // Trigger the hidden refresh button
-                     const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
-                     if (hiddenRefreshBtn) {{
-                         hiddenRefreshBtn.click();
-                         console.log('👻 [JS] Triggered hidden refresh');
+                     // Use global refresh function if available
+                     if (window.refreshProjects) {{
+                         console.log('👻 [JS] Using global refresh function');
+                         window.refreshProjects();
                      }} else {{
-                         console.log('👻 [JS] Hidden refresh button not found, using page reload');
-                         setTimeout(() => {{
-                             window.location.reload();
-                         }}, 500);
+                         console.log('👻 [JS] Global refresh not available, trying hidden refresh button');
+                         const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
+                         if (hiddenRefreshBtn) {{
+                             hiddenRefreshBtn.click();
+                             console.log('👻 [JS] Triggered hidden refresh');
+                         }} else {{
+                             console.log('👻 [JS] No refresh method available');
+                         }}
                      }}
                  }} else {{
                      console.error('Failed to toggle hidden:', data.error);
