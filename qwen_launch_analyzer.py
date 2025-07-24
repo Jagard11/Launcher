@@ -106,18 +106,18 @@ class QwenLaunchAnalyzer:
                 # Use smart detection based on project name and structure
                 project_name_lower = project_name.lower()
                 
-                if "stable" in project_name_lower and "diffusion" in project_name_lower:
-                    launch_command = "./webui.sh"
-                elif "comfyui" in project_name_lower:
-                    launch_command = "python main.py"
-                elif "text-generation" in project_name_lower or "oobabooga" in project_name_lower:
-                    launch_command = "./start_linux.sh"
-                elif "kohya" in project_name_lower:
+                # Pattern-based detection for common project types
+                if "webui" in project_name_lower and any(script.endswith('.sh') for script in structure.get('scripts', [])):
+                    # Projects with "webui" often use shell scripts and may need env vars
+                    webui_script = next((s for s in structure['scripts'] if 'webui' in s and s.endswith('.sh')), None)
+                    if webui_script:
+                        launch_command = f"./{webui_script}"
+                    else:
+                        launch_command = "./webui.sh"
+                elif "gui" in project_name_lower and "gui.py" in structure.get('python_files', []):
                     launch_command = "python gui.py"
-                elif "invokeai" in project_name_lower:
-                    launch_command = "invokeai-web"
-                elif "fooocus" in project_name_lower:
-                    launch_command = "python launch.py"
+                elif any(keyword in project_name_lower for keyword in ["web", "server", "api"]) and "main.py" in structure.get('python_files', []):
+                    launch_command = "python main.py"
                 else:
                     # Check for obvious launch files in the project
                     path_obj = Path(project_path)
@@ -162,6 +162,13 @@ class QwenLaunchAnalyzer:
 # 
 # Edit this script to customize how this project launches
 # The launcher will automatically cd to the project directory before running
+#
+# ENVIRONMENT VARIABLES:
+# Some projects expect configuration via environment variables instead of command line args:
+# - Web applications often use env vars like HOST, PORT, API_KEY
+# - Build tools may use ARGS, FLAGS, or OPTIONS variables
+# - If launch fails, check if the script expects environment variables
+# - Add: export VARIABLE_NAME="value" before the launch command if needed
 
 set -e  # Exit on error
 
@@ -286,7 +293,7 @@ echo "✅ {project_name} launched"
         if custom_launcher:
             return custom_launcher
         
-        # Read key files for better context
+        # Read key files for better context, including script analysis for env vars
         key_files_content = self._read_key_files(project_path, structure)
         
         # Create comprehensive context for intelligent AI analysis
@@ -364,6 +371,14 @@ IMPORTANT GUIDELINES:
 - If no clear launch method exists, set "missing_launch_method": true
 - If multiple good options exist or you're unsure, set "needs_user_input": true
 - Be honest about uncertainty - don't guess if you're not confident
+
+ENVIRONMENT VARIABLE PATTERNS TO DETECT:
+- Some applications expect configuration via environment variables instead of command line arguments
+- Look for hints in script names, README files, or script contents that mention environment variables
+- Common patterns: scripts that read from env vars before launching (check for 'export', variable references, curly brace syntax in script content)
+- If a script appears to expect environment variables, analyze what variables it needs and provide sensible defaults
+- When uncertain about env var requirements, create launcher templates that users can easily customize
+- Consider that web-based applications often use env vars for host/port/API settings
 
 Return ONLY the JSON response, no other text."""
 
@@ -575,7 +590,12 @@ Return ONLY the JSON response, no other text."""
         for script in priority_shell_scripts:
             if script in structure['executable_scripts']:
                 main_script = script
-                launch_command = f"./{script}"
+                # Check for patterns that might need environment variables
+                if script.startswith('webui') or 'webui' in script:
+                    # Web UI scripts often read from environment variables
+                    launch_command = f"./{script}"  # Let AI analyze if env vars are needed
+                else:
+                    launch_command = f"./{script}"
                 launch_type = "shell_script"
                 confidence = 0.9
                 break
@@ -584,7 +604,12 @@ Return ONLY the JSON response, no other text."""
                 script_path = Path(project_path) / script
                 if script_path.exists():
                     main_script = script
-                    launch_command = f"./{script}"
+                    # Apply same pattern detection
+                    if script.startswith('webui') or 'webui' in script:
+                        # Web UI scripts often read from environment variables
+                        launch_command = f"./{script}"  # Let AI analyze if env vars are needed
+                    else:
+                        launch_command = f"./{script}"
                     launch_type = "shell_script"
                     confidence = 0.85
                     break
@@ -795,18 +820,32 @@ Respond ONLY with valid JSON:"""
         return self.generate_launch_command(project_path, project_name) 
     
     def _read_key_files(self, project_path: str, structure: Dict) -> str:
-        """Read key files that might contain launch instructions"""
+        """Read key files that might contain launch instructions and environment variable usage"""
         path_obj = Path(project_path)
         content_parts = []
         
-        # Read first few lines of shell scripts
+        # Read shell scripts and look for environment variable patterns
         for script in structure['scripts'][:5]:
             script_path = path_obj / script
             if script_path.exists() and script_path.stat().st_size < 10000:
                 try:
                     with open(script_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        lines = f.readlines()[:10]
-                        content_parts.append(f"\n--- {script} (first 10 lines) ---\n{''.join(lines)}")
+                        content = f.read()
+                        lines = content.split('\n')[:15]  # Read more lines to catch env var usage
+                        
+                        # Look for environment variable patterns
+                        env_vars_found = []
+                        for line in content.split('\n'):
+                            # Look for common env var patterns
+                            if ('$' in line and any(pattern in line.upper() for pattern in ['ARGS', 'FLAGS', 'OPTIONS', 'HOST', 'PORT', 'API'])) or \
+                               ('export' in line.lower() and '=' in line):
+                                env_vars_found.append(line.strip())
+                        
+                        script_info = f"\n--- {script} (first 15 lines) ---\n{''.join(lines[:15])}"
+                        if env_vars_found:
+                            script_info += f"\n--- Environment variables detected in {script} ---\n" + '\n'.join(env_vars_found[:5])
+                        
+                        content_parts.append(script_info)
                 except:
                     pass
         
