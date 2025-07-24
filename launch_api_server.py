@@ -271,18 +271,18 @@ class LaunchAPIServer:
                 
                 # Execute command based on terminal type
                 if terminal_found == 'gnome-terminal':
-                    subprocess.Popen([terminal_found, '--', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '--', 'bash', '-c', command])
                 elif terminal_found == 'konsole':
-                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', command])
                 elif terminal_found in ['xfce4-terminal', 'mate-terminal', 'lxterminal']:
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                 elif terminal_found == 'terminator':
-                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', command])
                 elif terminal_found == 'xterm':
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                 else:
                     # Fallback for any other terminal
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                     
             elif os_name == "Darwin":  # macOS
                 # Uses AppleScript to open Terminal.app and run the command
@@ -433,12 +433,12 @@ class LaunchAPIServer:
             
             if env_info['type'] == 'conda':
                 env_name = env_info.get('name', 'base')
-                cmd = f'cd {project_path_quoted} && conda activate {env_name} && python3 {script_name}; exec bash'
+                cmd = f'cd {project_path_quoted} && conda activate {env_name} && python3 {script_name}'
             elif env_info['type'] == 'venv':
                 activate_path = env_info.get('activate_path', '')
-                cmd = f'cd {project_path_quoted} && source "{activate_path}" && python3 {script_name}; exec bash'
+                cmd = f'cd {project_path_quoted} && source "{activate_path}" && python3 {script_name}'
             else:
-                cmd = f'cd {project_path_quoted} && python3 {script_name}; exec bash'
+                cmd = f'cd {project_path_quoted} && python3 {script_name}'
             
             # Use the cross-platform terminal opening function
             terminal_result = self.open_terminal(cmd)

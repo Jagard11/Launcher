@@ -78,11 +78,11 @@ class LauncherUI:
             
             # Launch in new terminal
             if env_info['type'] == 'conda':
-                cmd = f'gnome-terminal -- bash -c "cd {project_path} && conda activate {env_info["name"]} && python {script_path.name}; exec bash"'
+                cmd = f'gnome-terminal -- bash -c "cd {project_path} && conda activate {env_info["name"]} && python {script_path.name}"'
             elif env_info['type'] == 'venv':
-                cmd = f'gnome-terminal -- bash -c "cd {project_path} && source {env_info["activate_path"]} && python {script_path.name}; exec bash"'
+                cmd = f'gnome-terminal -- bash -c "cd {project_path} && source {env_info["activate_path"]} && python {script_path.name}"'
             else:
-                cmd = f'gnome-terminal -- bash -c "cd {project_path} && python {script_path.name}; exec bash"'
+                cmd = f'gnome-terminal -- bash -c "cd {project_path} && python {script_path.name}"'
             
             subprocess.Popen(cmd, shell=True)
             return f"✅ Launched {Path(project_path).name} in new terminal"

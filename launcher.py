@@ -83,18 +83,18 @@ class UnifiedLauncher:
                 
                 # Execute command based on terminal type
                 if terminal_found == 'gnome-terminal':
-                    subprocess.Popen([terminal_found, '--', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '--', 'bash', '-c', command])
                 elif terminal_found == 'konsole':
-                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', command])
                 elif terminal_found in ['xfce4-terminal', 'mate-terminal', 'lxterminal']:
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                 elif terminal_found == 'terminator':
-                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', f'{command}; exec bash'])
+                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', command])
                 elif terminal_found == 'xterm':
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                 else:
                     # Fallback for any other terminal
-                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}"'])
                     
             elif os_name == "Darwin":  # macOS
                 # Uses AppleScript to open Terminal.app and run the command
