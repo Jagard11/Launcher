@@ -6,7 +6,9 @@ from typing import Dict, List, Optional
 from logger import logger
 
 DEFAULT_CONFIG = {
-    "index_directories": []
+    "index_directories": [],
+    "sort_preference": "name",  # Options: name, directory, last_modified, environment_type, size
+    "sort_direction": "asc"     # Options: asc, desc
 }
 
 class SettingsManager:
@@ -263,6 +265,35 @@ def build_settings_ui():
             placeholder="Directory management results will appear here..."
         )
         
+        # Project Sorting Section
+        gr.Markdown("### 🔄 Project Sorting")
+        gr.Markdown("Configure how projects are sorted in the App List tab.")
+        
+        with gr.Row():
+            with gr.Column(scale=2):
+                sort_preference = gr.Dropdown(
+                    label="Sort By",
+                    choices=[
+                        ("Project Name", "name"),
+                        ("Directory Path", "directory"), 
+                        ("Last Modified", "last_modified"),
+                        ("Environment Type", "environment_type"),
+                        ("Project Size", "size")
+                    ],
+                    value=settings_manager.config.get('sort_preference', 'name'),
+                    info="Choose how to sort projects in the list"
+                )
+            with gr.Column(scale=1):
+                sort_direction = gr.Dropdown(
+                    label="Order",
+                    choices=[
+                        ("Ascending (A-Z)", "asc"),
+                        ("Descending (Z-A)", "desc")
+                    ],
+                    value=settings_manager.config.get('sort_direction', 'asc'),
+                    info="Choose sort direction"
+                )
+        
         # Advanced Settings Section
         with gr.Accordion("🔧 Advanced Settings", open=False):
             gr.Markdown("### Raw Configuration Editor")
@@ -388,6 +419,20 @@ def build_settings_ui():
                 issues_text = "\n".join([f"• {issue}" for issue in issues])
                 return f"⚠️ **Configuration Issues Found:**\n\n{issues_text}"
         
+        def handle_sort_preference_change(sort_by, sort_order):
+            """Handle changes to sort preferences"""
+            try:
+                new_config = settings_manager.config.copy()
+                new_config['sort_preference'] = sort_by
+                new_config['sort_direction'] = sort_order
+                
+                if settings_manager.save_config(new_config):
+                    return "✅ Sort preferences updated successfully"
+                else:
+                    return "❌ Failed to save sort preferences"
+            except Exception as e:
+                return f"❌ Error updating sort preferences: {str(e)}"
+        
         # Wire up event handlers
         add_directory_btn.click(
             handle_add_directory,
@@ -420,6 +465,19 @@ def build_settings_ui():
         validate_btn.click(
             handle_validate_config,
             outputs=[validation_output]
+        )
+        
+        # Wire up sort preference handlers
+        sort_preference.change(
+            handle_sort_preference_change,
+            inputs=[sort_preference, sort_direction],
+            outputs=[settings_output]
+        )
+        
+        sort_direction.change(
+            handle_sort_preference_change,
+            inputs=[sort_preference, sort_direction],
+            outputs=[settings_output]
         )
         
         # Initialize display when tab loads (handled by parent app)

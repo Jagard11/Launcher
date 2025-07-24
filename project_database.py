@@ -115,17 +115,34 @@ class ProjectDatabase:
             return dict(row)
         return None
     
-    def get_all_projects(self, active_only: bool = True) -> List[Dict]:
-        """Get all projects from database"""
+    def get_all_projects(self, active_only: bool = True, sort_by: str = "name", sort_direction: str = "asc") -> List[Dict]:
+        """Get all projects from database with sorting options"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        if active_only:
-            cursor.execute('SELECT * FROM projects WHERE status = "active" ORDER BY name')
-        else:
-            cursor.execute('SELECT * FROM projects ORDER BY name')
+        # Map sort preferences to database columns
+        sort_column_map = {
+            "name": "name",
+            "directory": "path", 
+            "last_modified": "last_modified",
+            "environment_type": "environment_type",
+            "size": "size_mb"
+        }
         
+        # Get the database column name
+        db_column = sort_column_map.get(sort_by, "name")
+        
+        # Ensure valid sort direction
+        direction = "DESC" if sort_direction.lower() == "desc" else "ASC"
+        
+        # Build query with sorting (using COLLATE NOCASE for proper case-insensitive sorting)
+        if active_only:
+            query = f'SELECT * FROM projects WHERE status = "active" ORDER BY {db_column} COLLATE NOCASE {direction}'
+        else:
+            query = f'SELECT * FROM projects ORDER BY {db_column} COLLATE NOCASE {direction}'
+        
+        cursor.execute(query)
         rows = cursor.fetchall()
         conn.close()
         
@@ -354,37 +371,76 @@ class ProjectDatabase:
         logger.info(f"Toggled hidden status for {path}: {current_status} -> {new_status}")
         return new_status
     
-    def get_favorite_projects(self) -> List[Dict]:
-        """Get all favorite projects"""
+    def get_favorite_projects(self, sort_by: str = "name", sort_direction: str = "asc") -> List[Dict]:
+        """Get all favorite projects with sorting options"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_favorite = 1 ORDER BY name')
+        # Map sort preferences to database columns
+        sort_column_map = {
+            "name": "name",
+            "directory": "path", 
+            "last_modified": "last_modified",
+            "environment_type": "environment_type",
+            "size": "size_mb"
+        }
+        
+        db_column = sort_column_map.get(sort_by, "name")
+        direction = "DESC" if sort_direction.lower() == "desc" else "ASC"
+        query = f'SELECT * FROM projects WHERE status = "active" AND is_favorite = 1 ORDER BY {db_column} COLLATE NOCASE {direction}'
+        
+        cursor.execute(query)
         rows = cursor.fetchall()
         conn.close()
         
         return [dict(row) for row in rows]
     
-    def get_hidden_projects(self) -> List[Dict]:
-        """Get all hidden projects"""
+    def get_hidden_projects(self, sort_by: str = "name", sort_direction: str = "asc") -> List[Dict]:
+        """Get all hidden projects with sorting options"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_hidden = 1 ORDER BY name')
+        # Map sort preferences to database columns
+        sort_column_map = {
+            "name": "name",
+            "directory": "path", 
+            "last_modified": "last_modified",
+            "environment_type": "environment_type",
+            "size": "size_mb"
+        }
+        
+        db_column = sort_column_map.get(sort_by, "name")
+        direction = "DESC" if sort_direction.lower() == "desc" else "ASC"
+        query = f'SELECT * FROM projects WHERE status = "active" AND is_hidden = 1 ORDER BY {db_column} COLLATE NOCASE {direction}'
+        
+        cursor.execute(query)
         rows = cursor.fetchall()
         conn.close()
         
         return [dict(row) for row in rows]
     
-    def get_visible_projects(self) -> List[Dict]:
-        """Get all visible (non-hidden, non-favorite) projects"""
+    def get_visible_projects(self, sort_by: str = "name", sort_direction: str = "asc") -> List[Dict]:
+        """Get all visible (non-hidden, non-favorite) projects with sorting options"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_hidden = 0 AND is_favorite = 0 ORDER BY name')
+        # Map sort preferences to database columns
+        sort_column_map = {
+            "name": "name",
+            "directory": "path", 
+            "last_modified": "last_modified",
+            "environment_type": "environment_type",
+            "size": "size_mb"
+        }
+        
+        db_column = sort_column_map.get(sort_by, "name")
+        direction = "DESC" if sort_direction.lower() == "desc" else "ASC"
+        query = f'SELECT * FROM projects WHERE status = "active" AND is_hidden = 0 AND is_favorite = 0 ORDER BY {db_column} COLLATE NOCASE {direction}'
+        
+        cursor.execute(query)
         rows = cursor.fetchall()
         conn.close()
         

@@ -181,7 +181,7 @@ class ProjectScanner:
             all_projects.extend(projects)
             logger.info(f"📊 Found {len(projects)} projects in {directory}")
         
-        # Sort by name
+        # Sort by name (database will handle final sorting based on user preferences)
         all_projects.sort(key=lambda x: x['name'].lower())
         
         logger.info(f"🎯 Total projects found: {len(all_projects)}")

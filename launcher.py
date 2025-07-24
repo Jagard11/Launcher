@@ -126,10 +126,14 @@ class UnifiedLauncher:
         logger.info(f"Launcher initialized with {len(self.current_projects)} projects")
     
     def load_projects_from_db(self):
-        """Load projects from database"""
+        """Load projects from database with sort preferences"""
         try:
-            self.current_projects = db.get_all_projects(active_only=True)
-            logger.info(f"Loaded {len(self.current_projects)} projects from database")
+            # Get sort preferences from config
+            sort_by = self.config.get('sort_preference', 'name')
+            sort_direction = self.config.get('sort_direction', 'asc')
+            
+            self.current_projects = db.get_all_projects(active_only=True, sort_by=sort_by, sort_direction=sort_direction)
+            logger.info(f"Loaded {len(self.current_projects)} projects from database, sorted by {sort_by} ({sort_direction})")
             self.last_ui_update = time.time()
         except Exception as e:
             logger.error(f"Error loading projects from database: {e}")
@@ -757,6 +761,39 @@ class UnifiedLauncher:
                 color: var(--text-primary) !important;
                 border-color: var(--accent-red) !important;
             }
+            .sort-label-compact {
+                color: var(--text-secondary) !important;
+                font-weight: 500 !important;
+                font-size: 12px !important;
+                margin: 0 6px 0 0 !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: flex-end !important;
+                white-space: nowrap !important;
+                min-width: fit-content !important;
+                height: 32px !important;
+            }
+            .sort-controls {
+                display: flex !important;
+                align-items: center !important;
+                justify-content: flex-end !important;
+                gap: 4px !important;
+                height: 32px !important;
+            }
+            .sort-dropdown-compact {
+                min-height: 32px !important;
+                height: 32px !important;
+            }
+            .sort-dropdown-compact .wrap {
+                min-height: 32px !important;
+                height: 32px !important;
+            }
+            .sort-dropdown-compact select {
+                min-height: 28px !important;
+                height: 28px !important;
+                padding: 4px 8px !important;
+                font-size: 12px !important;
+            }
             /* Project cards - styled in main launcher */
             </style>
             """)
@@ -765,7 +802,7 @@ class UnifiedLauncher:
             
             # Status and controls - compact and clean
             with gr.Row(elem_classes="status-controls"):
-                with gr.Column(scale=3):
+                with gr.Column(scale=4):
                     status_display = gr.Markdown(f"""
 📊 **{stats['active_projects']} Projects** • 🔄 **{stats['dirty_projects']} Pending Updates**
                     """)
@@ -775,6 +812,34 @@ class UnifiedLauncher:
                         manual_scan_btn = gr.Button("🔄 Scan", size="sm")
                         process_dirty_btn = gr.Button("🤖 Process", size="sm")
                         refresh_btn = gr.Button("♻️ Refresh", size="sm")
+                
+                with gr.Column(scale=3):
+                    with gr.Row(elem_classes="sort-controls"):
+                        gr.Markdown("**Sort By:**", elem_classes="sort-label-compact")
+                        sort_by_dropdown = gr.Dropdown(
+                            choices=[
+                                ("Project Name", "name"),
+                                ("Directory Path", "directory"), 
+                                ("Last Modified", "last_modified"),
+                                ("Environment Type", "environment_type"),
+                                ("Project Size", "size")
+                            ],
+                            value=self.config.get('sort_preference', 'name'),
+                            show_label=False,
+                            scale=2,
+                            elem_classes="sort-dropdown-compact"
+                        )
+                        gr.Markdown("**Order:**", elem_classes="sort-label-compact")
+                        sort_direction_dropdown = gr.Dropdown(
+                            choices=[
+                                ("A-Z", "asc"),
+                                ("Z-A", "desc")
+                            ],
+                            value=self.config.get('sort_direction', 'asc'),
+                            show_label=False,
+                            scale=1,
+                            elem_classes="sort-dropdown-compact"
+                        )
             
             # Projects display
             projects_display = gr.HTML(self.create_projects_grid(self.current_projects, api_port))
@@ -817,6 +882,28 @@ class UnifiedLauncher:
             def clear_search():
                 projects_html = self.create_projects_grid(self.current_projects, api_port)
                 return "", projects_html
+            
+            def handle_sort_change(sort_by, sort_direction):
+                """Handle changes to sort preferences"""
+                try:
+                    # Update config in memory
+                    self.config['sort_preference'] = sort_by
+                    self.config['sort_direction'] = sort_direction
+                    
+                    # Save config to file
+                    from settings_ui import SettingsManager
+                    settings_manager = SettingsManager()
+                    settings_manager.save_config(self.config)
+                    
+                    # Reload projects with new sort
+                    self.load_projects_from_db()
+                    
+                    # Update display
+                    projects_html = self.create_projects_grid(self.current_projects, api_port)
+                    return projects_html
+                except Exception as e:
+                    logger.error(f"Error changing sort: {e}")
+                    return self.create_projects_grid(self.current_projects, api_port)
             
             def handle_launch(project_name, project_path):
                 """Launch a project using custom launcher or generate one if needed"""
@@ -935,6 +1022,19 @@ class UnifiedLauncher:
             hidden_refresh_trigger.click(
                 handle_refresh,
                 outputs=[status_display, projects_display]
+            )
+            
+            # Wire up sort dropdown handlers
+            sort_by_dropdown.change(
+                handle_sort_change,
+                inputs=[sort_by_dropdown, sort_direction_dropdown],
+                outputs=[projects_display]
+            )
+            
+            sort_direction_dropdown.change(
+                handle_sort_change,
+                inputs=[sort_by_dropdown, sort_direction_dropdown],
+                outputs=[projects_display]
             )
             
             # Wire up launch trigger for Gradio-native launch handling
