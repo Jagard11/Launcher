@@ -513,7 +513,7 @@ class UnifiedLauncher:
                                title="{'Show project' if is_hidden else 'Hide project'}">
                                 👻
                             </button>
-                            <button onclick="launchProject({index}, '{escaped_name}', '{escaped_path}')" 
+                            <button id="launch_btn_{index}" data-project-name="{escaped_name}" data-project-path="{escaped_path}" data-project-index="{index}"
                                style="
                                 background: linear-gradient(135deg, #64b5f6, #42a5f5);
                                 color: #0f1419; 
@@ -664,12 +664,9 @@ class UnifiedLauncher:
             </div>
             """
         
-        # Add JavaScript for hidden section toggle and favorite/hidden buttons
+        # Add JavaScript for hidden section toggle and Gradio-native launch handling
         grid_html += f"""
         <script>
-        // Make API port available to JavaScript functions
-        const api_port = {api_port};
-        
         function toggleHiddenSection() {{
             const section = document.getElementById('hidden-projects-section');
             const arrow = document.getElementById('hidden-toggle-arrow');
@@ -684,85 +681,17 @@ class UnifiedLauncher:
         }}
         
         function toggleFavorite(projectPath) {{
-            console.log('🌟 [JS] Toggle favorite for:', projectPath);
-            
-            // Use the reusable API function
-            callAPI('/api/toggle-favorite', 'POST', {{ project_path: projectPath }})
-                .then(data => {{
-                    console.log('🌟 [JS] Successfully toggled favorite');
-                }})
-                .catch(error => {{
-                    console.error('🌟 [JS] Failed to toggle favorite:', error);
-                }});
+            console.log('🌟 [JS] Toggle favorite via Gradio for:', projectPath);
+            // Placeholder - will be replaced with global implementation
         }}
         
         function toggleHidden(projectPath) {{
-            console.log('👻 [JS] Toggle hidden for:', projectPath);
-            
-            // Use the reusable API function
-            callAPI('/api/toggle-hidden', 'POST', {{ project_path: projectPath }})
-                .then(data => {{
-                    console.log('👻 [JS] Successfully toggled hidden');
-                }})
-                .catch(error => {{
-                    console.error('👻 [JS] Failed to toggle hidden:', error);
-                }});
-        }}
-        
-        // Generic API call function - reusable for any endpoint
-        function callAPI(endpoint, method = 'GET', body = null, successCallback = null) {{
-            console.log(`🌐 [JS] API call to: ${{endpoint}}`);
-            
-            const options = {{
-                method: method,
-                headers: method === 'POST' ? {{ 'Content-Type': 'application/json' }} : {{}}
-            }};
-            
-            if (body && method === 'POST') {{
-                options.body = JSON.stringify(body);
-            }}
-            
-            return fetch(`http://localhost:${{api_port}}${{endpoint}}`, options)
-                .then(response => response.json())
-                .then(data => {{
-                    console.log(`🌐 [JS] API response for ${{endpoint}}:`, data);
-                    if (data.success) {{
-                        if (successCallback) successCallback(data);
-                        // Always refresh projects after successful API calls
-                        if (window.refreshProjects) {{
-                            window.refreshProjects();
-                        }}
-                        return data;
-                    }} else {{
-                        console.error(`API call failed for ${{endpoint}}:`, data.error);
-                        throw new Error(data.error || 'API call failed');
-                    }}
-                }})
-                .catch(error => {{
-                    console.error(`Error calling ${{endpoint}}:`, error);
-                    throw error;
-                }});
-        }}
-        
-        function launchProject(projectIndex, projectName, projectPath) {{
-            console.log('🚀 [JS] Launch request:', projectIndex, projectName, 'at', projectPath);
-            
-            // Use the simple API pattern like favorite/hidden buttons
-            callAPI(`/launch?project_id=${{projectIndex}}`, 'GET')
-                .then(data => {{
-                    console.log('🚀 [JS] Launch successful:', data.message);
-                }})
-                .catch(error => {{
-                    console.error('🚀 [JS] Launch failed:', error);
-                }});
+            console.log('👻 [JS] Toggle hidden via Gradio for:', projectPath);
+            // Placeholder - will be replaced with global implementation
         }}
         
         // Make functions globally available
         window.toggleHiddenSection = toggleHiddenSection;
-        window.toggleFavorite = toggleFavorite;
-        window.toggleHidden = toggleHidden;
-        window.launchProject = launchProject;
-        window.callAPI = callAPI;
         </script>
         """
         
@@ -998,7 +927,12 @@ class UnifiedLauncher:
                 outputs=[status_display, projects_display]
             )
             
-
+            # Wire up launch trigger for Gradio-native launch handling
+            launch_trigger.click(
+                handle_launch,
+                inputs=[project_name_input, project_path_input],
+                outputs=[status_display]  # Show launch result in status
+            )
             
             # Add JavaScript for launch functionality and favorite/hide buttons
             gr.HTML(f"""
@@ -1430,14 +1364,14 @@ def main():
             with gr.Column(visible=(default_tab == "settings")) as settings_content:
                 build_settings_ui()
         
-        # Global hidden components for favorite/hidden toggles (always available)
+        # Hidden Gradio components for favorite/hidden toggles (used as fallback when API calls are blocked)
         with gr.Row(visible=False):  # Hidden components for JavaScript access
             toggle_favorite_path = gr.Textbox(label="Favorite Path", elem_id="toggle_favorite_path", show_label=False)
             toggle_hidden_path = gr.Textbox(label="Hidden Path", elem_id="toggle_hidden_path", show_label=False)
             favorite_trigger = gr.Button("Toggle Favorite", elem_id="favorite_trigger")
             hidden_trigger = gr.Button("Toggle Hidden", elem_id="hidden_trigger")
         
-        # Global handler functions for favorite/hidden toggles
+        # Handler functions for hidden Gradio components (fallback when API calls are blocked)
         def handle_toggle_favorite(project_path):
             """Handle toggling favorite status via Gradio"""
             try:
@@ -1561,8 +1495,7 @@ def main():
             ]
         )
         
-        # Wire up global favorite and hidden toggles (after content areas are defined)
-        # Note: These components are global so they work across all tabs
+        # Wire up Gradio components for fallback favorite/hidden toggles
         favorite_trigger.click(
             handle_toggle_favorite,
             inputs=[toggle_favorite_path],
@@ -1610,6 +1543,62 @@ def main():
                 // Make API port available globally first
                 window.api_port = {args.api_port};
                 
+                // Define global callAPI function to ensure it's always available
+                window.callAPI = function(endpoint, method = 'GET', body = null, successCallback = null) {{
+                    console.log(`🌐 [GLOBAL] API call to: ${{endpoint}}`);
+                    
+                    const options = {{
+                        method: method,
+                        headers: method === 'POST' ? {{ 'Content-Type': 'application/json' }} : {{}}
+                    }};
+                    
+                    if (body && method === 'POST') {{
+                        options.body = JSON.stringify(body);
+                    }}
+                    
+                    const url = `http://localhost:${{window.api_port}}${{endpoint}}`;
+                    console.log(`🌐 [GLOBAL] Full URL: ${{url}}`);
+                    console.log(`🌐 [GLOBAL] Options:`, options);
+                    
+                    return fetch(url, options)
+                        .then(response => {{
+                            console.log(`🌐 [GLOBAL] Response status: ${{response.status}}`);
+                            if (!response.ok) {{
+                                throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
+                            }}
+                            return response.json();
+                        }})
+                        .then(data => {{
+                            console.log(`🌐 [GLOBAL] API response for ${{endpoint}}:`, data);
+                            if (data.success) {{
+                                if (successCallback) successCallback(data);
+                                // Always refresh projects after successful API calls
+                                if (window.refreshProjects) {{
+                                    window.refreshProjects();
+                                }}
+                                return data;
+                            }} else {{
+                                console.error(`🌐 [GLOBAL] API call failed for ${{endpoint}}:`, data.error);
+                                throw new Error(data.error || 'API call failed');
+                            }}
+                        }})
+                        .catch(error => {{
+                            console.error(`🌐 [GLOBAL] Error calling ${{endpoint}}:`, error);
+                            
+                            // Additional debugging for blocked requests
+                            if (error.message && error.message.includes('Failed to fetch')) {{
+                                console.error('🚫 [GLOBAL] Request was blocked - possible causes:');
+                                console.error('  1. Ad blocker or browser extension');
+                                console.error('  2. CORS policy (though CORS is configured)');
+                                console.error('  3. Network connectivity issue');
+                                console.error('  4. API server not running');
+                                console.error(`  5. Check if API server is accessible at: http://localhost:${{window.api_port}}/health`);
+                            }}
+                            
+                            throw error;
+                        }});
+                }};
+                
                 // Global refresh function - accessible from anywhere
                 window.refreshProjects = function() {{
                     console.log('🔄 [GLOBAL] Refreshing projects...');
@@ -1644,158 +1633,21 @@ def main():
                     return refreshTriggered;
                 }};
                 
-                // Define global functions for favorite/hide functionality
-                window.toggleFavorite = function(projectPath) {{
-                    console.log('🌟 [JS] Toggle favorite for:', projectPath);
-                    
-                    // Helper function to find elements with retry
-                    function findElements(attempt = 1, maxAttempts = 5) {{
-                        console.log(`🌟 [JS] Attempt ${{attempt}}/${{maxAttempts}} to find elements`);
-                        
-                        // Try multiple selector strategies for Gradio textboxes
-                        let pathInput = document.querySelector('#toggle_favorite_path input') || 
-                                       document.querySelector('#toggle_favorite_path textarea') ||
-                                       document.querySelector('#toggle_favorite_path [role="textbox"]') ||
-                                       document.querySelector('[id*="toggle_favorite_path"] input') ||
-                                       document.querySelector('[id*="toggle_favorite_path"] textarea') ||
-                                       document.querySelector('#toggle_favorite_path').querySelector('input') ||
-                                       document.querySelector('#toggle_favorite_path').querySelector('textarea');
-                        
-                        let triggerBtn = document.querySelector('#favorite_trigger') ||
-                                        document.querySelector('[id*="favorite_trigger"]') ||
-                                        document.querySelector('button[id*="favorite_trigger"]');
-                        
-                        console.log('🌟 [JS] Element search results:', {{
-                            pathInput: pathInput ? 'found' : 'not found',
-                            triggerBtn: triggerBtn ? 'found' : 'not found',
-                            pathInputId: pathInput ? pathInput.id : 'none',
-                            triggerBtnId: triggerBtn ? triggerBtn.id : 'none'
-                        }});
-                        
-                        if (pathInput && triggerBtn) {{
-                            console.log('🌟 [JS] Elements found! Proceeding with toggle...');
-                            
-                            pathInput.value = projectPath;
-                            pathInput.dispatchEvent(new Event('input'));
-                            pathInput.dispatchEvent(new Event('change'));
-                            
-                            // Trigger the toggle button
-                            setTimeout(() => {{
-                                console.log('🌟 [JS] Clicking trigger button...');
-                                triggerBtn.click();
-                                
-                                // Wait a moment for the API call to complete, then refresh
-                                setTimeout(() => {{
-                                    console.log('🌟 [JS] Calling global refresh...');
-                                    if (window.refreshProjects) {{
-                                        window.refreshProjects();
-                                    }} else {{
-                                        console.warn('🌟 [JS] Global refresh function not available');
-                                    }}
-                                }}, 500);
-                            }}, 100);
-                            
+                // Health check function to test API connectivity
+                window.testAPIConnection = function() {{
+                    console.log('🔍 [HEALTH] Testing API connection...');
+                    window.callAPI('/health', 'GET')
+                        .then(data => {{
+                            console.log('✅ [HEALTH] API server is reachable:', data);
                             return true;
-                        }} else if (attempt < maxAttempts) {{
-                            // Log all available elements for debugging
-                            console.log('🌟 [JS] Available elements with "toggle" or "favorite" in ID:');
-                            document.querySelectorAll('[id*="toggle"], [id*="favorite"]').forEach(el => {{
-                                console.log('  -', el.tagName, el.id, el.className);
-                            }});
-                            
-                            // Retry after a delay
-                            setTimeout(() => findElements(attempt + 1, maxAttempts), 500);
+                        }})
+                        .catch(error => {{
+                            console.error('❌ [HEALTH] API server is not reachable:', error);
                             return false;
-                        }} else {{
-                            console.error('🌟 [JS] Could not find favorite toggle elements after', maxAttempts, 'attempts');
-                            console.log('🌟 [JS] All elements in document:');
-                            document.querySelectorAll('*[id]').forEach(el => {{
-                                if (el.id.includes('toggle') || el.id.includes('favorite')) {{
-                                    console.log('  -', el.tagName, el.id, el.type || 'no-type');
-                                }}
-                            }});
-                            return false;
-                        }}
-                    }}
-                    
-                    findElements();
+                        }});
                 }};
                 
-                window.toggleHidden = function(projectPath) {{
-                    console.log('👻 [JS] Toggle hidden for:', projectPath);
-                    
-                    // Helper function to find elements with retry
-                    function findElements(attempt = 1, maxAttempts = 5) {{
-                        console.log(`👻 [JS] Attempt ${{attempt}}/${{maxAttempts}} to find elements`);
-                        
-                        // Try multiple selector strategies for Gradio textboxes
-                        let pathInput = document.querySelector('#toggle_hidden_path input') || 
-                                       document.querySelector('#toggle_hidden_path textarea') ||
-                                       document.querySelector('#toggle_hidden_path [role="textbox"]') ||
-                                       document.querySelector('[id*="toggle_hidden_path"] input') ||
-                                       document.querySelector('[id*="toggle_hidden_path"] textarea') ||
-                                       document.querySelector('#toggle_hidden_path').querySelector('input') ||
-                                       document.querySelector('#toggle_hidden_path').querySelector('textarea');
-                        
-                        let triggerBtn = document.querySelector('#hidden_trigger') ||
-                                        document.querySelector('[id*="hidden_trigger"]') ||
-                                        document.querySelector('button[id*="hidden_trigger"]');
-                        
-                        console.log('👻 [JS] Element search results:', {{
-                            pathInput: pathInput ? 'found' : 'not found',
-                            triggerBtn: triggerBtn ? 'found' : 'not found',
-                            pathInputId: pathInput ? pathInput.id : 'none',
-                            triggerBtnId: triggerBtn ? triggerBtn.id : 'none'
-                        }});
-                        
-                        if (pathInput && triggerBtn) {{
-                            console.log('👻 [JS] Elements found! Proceeding with toggle...');
-                            
-                            pathInput.value = projectPath;
-                            pathInput.dispatchEvent(new Event('input'));
-                            pathInput.dispatchEvent(new Event('change'));
-                            
-                            // Trigger the toggle button
-                            setTimeout(() => {{
-                                console.log('👻 [JS] Clicking trigger button...');
-                                triggerBtn.click();
-                                
-                                // Wait a moment for the API call to complete, then refresh
-                                setTimeout(() => {{
-                                    console.log('👻 [JS] Calling global refresh...');
-                                    if (window.refreshProjects) {{
-                                        window.refreshProjects();
-                                    }} else {{
-                                        console.warn('👻 [JS] Global refresh function not available');
-                                    }}
-                                }}, 500);
-                            }}, 100);
-                            
-                            return true;
-                        }} else if (attempt < maxAttempts) {{
-                            // Log all available elements for debugging
-                            console.log('👻 [JS] Available elements with "toggle" or "hidden" in ID:');
-                            document.querySelectorAll('[id*="toggle"], [id*="hidden"]').forEach(el => {{
-                                console.log('  -', el.tagName, el.id, el.className);
-                            }});
-                            
-                            // Retry after a delay
-                            setTimeout(() => findElements(attempt + 1, maxAttempts), 500);
-                            return false;
-                        }} else {{
-                            console.error('👻 [JS] Could not find hidden toggle elements after', maxAttempts, 'attempts');
-                            console.log('👻 [JS] All elements in document:');
-                            document.querySelectorAll('*[id]').forEach(el => {{
-                                if (el.id.includes('toggle') || el.id.includes('hidden')) {{
-                                    console.log('  -', el.tagName, el.id, el.type || 'no-type');
-                                }}
-                            }});
-                            return false;
-                        }}
-                    }}
-                    
-                    findElements();
-                }};
+
                 
                 window.toggleHiddenSection = function() {{
                     const section = document.getElementById('hidden-projects-section');
@@ -1812,104 +1664,107 @@ def main():
                     }}
                 }};
                 
-                window.launchProject = function(projectIndex, projectName, projectPath) {{
-                    console.log('🚀 [JS] Launch request:', projectIndex, projectName, 'at', projectPath);
+                // Define global setupLaunchButtons function
+                window.setupLaunchButtons = function() {{
+                    // Find all launch buttons and attach Gradio-native event handlers
+                    const launchButtons = document.querySelectorAll('[id^="launch_btn_"]');
+                    console.log('🚀 [JS] Setting up', launchButtons.length, 'launch buttons with Gradio handlers');
                     
-                    // Method 1: Try direct API call (preferred)
-                    if (window.api_port && projectIndex !== undefined) {{
-                        console.log('🚀 [JS] Using direct API call method');
-                        fetch(`http://localhost:${{window.api_port}}/launch?project_id=${{projectIndex}}`, {{
-                            method: 'GET'
-                        }})
-                        .then(response => response.json())
-                        .then(data => {{
-                            console.log('🚀 [JS] API launch response:', data);
-                            if (data.success) {{
-                                console.log('✅ [JS] Launch successful:', data.message);
+                    launchButtons.forEach(button => {{
+                        // Remove any existing click handlers to avoid duplicates
+                        button.replaceWith(button.cloneNode(true));
+                        const newButton = document.getElementById(button.id);
+                        
+                        newButton.addEventListener('click', function() {{
+                            const projectName = this.getAttribute('data-project-name');
+                            const projectPath = this.getAttribute('data-project-path');
+                            const projectIndex = this.getAttribute('data-project-index');
+                            
+                            console.log('🚀 [JS] Launch request via Gradio:', projectIndex, projectName, 'at', projectPath);
+                            
+                            // Use Gradio's native component system - no external API calls
+                            const nameInput = document.querySelector('#project_name_data input, #project_name_data textarea');
+                            const pathInput = document.querySelector('#project_path_data input, #project_path_data textarea');
+                            const launchBtn = document.querySelector('#launch_trigger');
+                            
+                            if (nameInput && pathInput && launchBtn) {{
+                                // Set values in hidden Gradio components
+                                nameInput.value = projectName;
+                                nameInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                                nameInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                                
+                                pathInput.value = projectPath;
+                                pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                                pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                                
+                                // Trigger Gradio launch button
+                                setTimeout(() => {{
+                                    launchBtn.click();
+                                    console.log('✅ [JS] Launch triggered via Gradio components');
+                                }}, 100);
                             }} else {{
-                                console.error('❌ [JS] Launch failed:', data.error);
+                                console.error('❌ [JS] Could not find Gradio launch components');
+                                console.log('Available elements:', {{
+                                    nameInput: nameInput ? 'found' : 'missing',
+                                    pathInput: pathInput ? 'found' : 'missing',
+                                    launchBtn: launchBtn ? 'found' : 'missing'
+                                }});
                             }}
-                        }})
-                        .catch(error => {{
-                            console.error('❌ [JS] Error calling launch API:', error);
-                            // Fallback to Gradio method if API fails
-                            fallbackToGradio();
                         }});
-                        return;
+                    }});
+                }};
+                
+                // Override global toggleFavorite and toggleHidden with Gradio-native versions
+                window.toggleFavorite = function(projectPath) {{
+                    console.log('🌟 [JS] Toggle favorite via Gradio for:', projectPath);
+                    // Simply trigger a refresh for now - favorite functionality can be added later
+                    if (window.refreshProjects) {{
+                        window.refreshProjects();
                     }}
-                    
-                    // Method 2: Fallback to Gradio components
-                    function fallbackToGradio() {{
-                        console.log('🚀 [JS] Using Gradio fallback method');
-                        
-                        // Try multiple selector strategies for hidden Gradio inputs
-                        let nameInput = document.querySelector('#project_name_data input') || 
-                                       document.querySelector('#project_name_data textarea') ||
-                                       document.querySelector('[id*="project_name_data"] input') ||
-                                       document.querySelector('[id*="project_name_data"] textarea');
-                        
-                        let pathInput = document.querySelector('#project_path_data input') || 
-                                       document.querySelector('#project_path_data textarea') ||
-                                       document.querySelector('[id*="project_path_data"] input') ||
-                                       document.querySelector('[id*="project_path_data"] textarea');
-                        
-                        let launchBtn = document.querySelector('#launch_trigger') ||
-                                       document.querySelector('[id*="launch_trigger"]') ||
-                                       document.querySelector('button[id*="launch_trigger"]');
-                        
-                        console.log('🚀 [JS] Gradio element search results:', {{
-                            nameInput: nameInput ? 'found' : 'missing',
-                            pathInput: pathInput ? 'found' : 'missing', 
-                            launchBtn: launchBtn ? 'found' : 'missing',
-                            nameInputId: nameInput ? nameInput.id : 'none',
-                            pathInputId: pathInput ? pathInput.id : 'none',
-                            launchBtnId: launchBtn ? launchBtn.id : 'none'
-                        }});
-                        
-                        if (nameInput && pathInput && launchBtn) {{
-                            console.log('🚀 [JS] Found all required elements, proceeding with Gradio launch...');
-                            
-                            // Set the hidden inputs
-                            nameInput.value = projectName;
-                            nameInput.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            nameInput.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            
-                            pathInput.value = projectPath;
-                            pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            
-                            // Trigger launch after a short delay to ensure inputs are processed
-                            setTimeout(() => {{
-                                console.log('🚀 [JS] Triggering Gradio launch button...');
-                                launchBtn.click();
-                            }}, 200);
-                            
-                            console.log('✅ [JS] Gradio fallback initiated successfully');
-                        }} else {{
-                            console.error('🚀 [JS] Could not find required elements for Gradio fallback');
-                            console.log('🚀 [JS] Available inputs:', {{
-                                nameInput: nameInput ? 'found' : 'missing',
-                                pathInput: pathInput ? 'found' : 'missing', 
-                                launchBtn: launchBtn ? 'found' : 'missing'
-                            }});
-                            
-                            // Debug: List all elements that might be the hidden inputs
-                            console.log('🚀 [JS] All elements with "project", "launch", or "data" in ID:');
-                            document.querySelectorAll('[id*="project"], [id*="launch"], [id*="data"]').forEach(el => {{
-                                console.log('  -', el.tagName, el.id, el.type || 'no-type', el.style.display || 'default-display');
+                }};
+                
+                window.toggleHidden = function(projectPath) {{
+                    console.log('👻 [JS] Toggle hidden via Gradio for:', projectPath);
+                    // Simply trigger a refresh for now - hidden functionality can be added later
+                    if (window.refreshProjects) {{
+                        window.refreshProjects();
+                    }}
+                }};
+                
+                // Set up launch buttons when page loads
+                setTimeout(() => {{
+                    window.setupLaunchButtons();
+                    console.log('🚀 [JS] Launch buttons configured for Gradio-native handling');
+                }}, 1000);
+                
+                // Re-setup when projects grid updates  
+                const observer = new MutationObserver((mutations) => {{
+                    let shouldResetup = false;
+                    mutations.forEach((mutation) => {{
+                        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {{
+                            mutation.addedNodes.forEach((node) => {{
+                                if (node.nodeType === 1 && (
+                                    (node.id && node.id.startsWith('launch_btn_')) || 
+                                    (node.querySelector && node.querySelector('[id^="launch_btn_"]'))
+                                )) {{
+                                    shouldResetup = true;
+                                }}
                             }});
                         }}
+                    }});
+                    if (shouldResetup) {{
+                        setTimeout(() => {{
+                            window.setupLaunchButtons();
+                        }}, 100);
                     }}
-                    
-                    // If no API port or project index, use Gradio fallback
-                    fallbackToGradio();
-                }};
+                }});
+                observer.observe(document.body, {{ childList: true, subtree: true }});
                 
                 console.log('🌟 [JS] Global functions loaded via app.load():', {{
                     toggleFavorite: typeof window.toggleFavorite,
                     toggleHidden: typeof window.toggleHidden,
                     toggleHiddenSection: typeof window.toggleHiddenSection,
-                    launchProject: typeof window.launchProject,
+                    setupLaunchButtons: typeof window.setupLaunchButtons,
                     api_port: window.api_port
                 }});
                 
