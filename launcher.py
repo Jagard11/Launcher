@@ -821,6 +821,16 @@ class UnifiedLauncher:
             def handle_launch(project_name, project_path):
                 """Launch a project using custom launcher or generate one if needed"""
                 try:
+                    print(f"\n🚀 [GRADIO-LAUNCH] ===== LAUNCH REQUEST RECEIVED =====")
+                    print(f"🚀 [GRADIO-LAUNCH] Function called with:")
+                    print(f"🚀 [GRADIO-LAUNCH]   Project: '{project_name}'")
+                    print(f"🚀 [GRADIO-LAUNCH]   Path: '{project_path}'")
+                    print(f"🚀 [GRADIO-LAUNCH] =====================================")
+                    
+                    if not project_name or not project_path:
+                        print(f"❌ [GRADIO-LAUNCH] Missing required parameters!")
+                        return "❌ Missing project name or path"
+                    
                     print(f"🚀 [UNIFIED] ===== SMART LAUNCH SYSTEM =====")
                     print(f"🚀 [UNIFIED] Project: {project_name}")
                     print(f"🚀 [UNIFIED] Path: {project_path}")
@@ -1273,6 +1283,28 @@ def main():
             opacity: 0 !important;
             pointer-events: none !important;
         }
+        
+        /* Hidden toggle controls for favorite/hidden functionality */
+        .hidden-toggle-controls {
+            position: absolute !important;
+            top: -9999px !important;
+            left: -9999px !important;
+            width: 1px !important;
+            height: 1px !important;
+            overflow: hidden !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            z-index: -1 !important;
+        }
+        
+        /* Keep toggle elements accessible to JavaScript but invisible */
+        .hidden-toggle-controls input,
+        .hidden-toggle-controls textarea,
+        .hidden-toggle-controls button {
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
 
         /* Mobile responsiveness */
         @media (max-width: 768px) {
@@ -1364,65 +1396,57 @@ def main():
             with gr.Column(visible=(default_tab == "settings")) as settings_content:
                 build_settings_ui()
         
-        # Hidden Gradio components for favorite/hidden toggles (used as fallback when API calls are blocked)
-        with gr.Row(visible=False):  # Hidden components for JavaScript access
-            toggle_favorite_path = gr.Textbox(label="Favorite Path", elem_id="toggle_favorite_path", show_label=False)
-            toggle_hidden_path = gr.Textbox(label="Hidden Path", elem_id="toggle_hidden_path", show_label=False)
-            favorite_trigger = gr.Button("Toggle Favorite", elem_id="favorite_trigger")
-            hidden_trigger = gr.Button("Toggle Hidden", elem_id="hidden_trigger")
+        # Hidden Gradio components for favorite/hidden toggles - present in DOM but visually hidden
+        with gr.Row(elem_classes="hidden-toggle-controls"):  # CSS hidden components for JavaScript access
+            toggle_favorite_path = gr.Textbox(label="Favorite Path", elem_id="toggle_favorite_path", show_label=False, container=False)
+            toggle_hidden_path = gr.Textbox(label="Hidden Path", elem_id="toggle_hidden_path", show_label=False, container=False)
+            favorite_trigger = gr.Button("Toggle Favorite", elem_id="favorite_trigger", size="sm")
+            hidden_trigger = gr.Button("Toggle Hidden", elem_id="hidden_trigger", size="sm")
         
-        # Handler functions for hidden Gradio components (fallback when API calls are blocked)
+        # Handler functions for Gradio-native favorite/hidden toggles
         def handle_toggle_favorite(project_path):
-            """Handle toggling favorite status via Gradio"""
+            """Handle toggling favorite status via Gradio - direct database access"""
             try:
-                import requests
-                response = requests.post(
-                    f"http://localhost:{args.api_port}/api/toggle-favorite",
-                    headers={"Content-Type": "application/json"},
-                    json={"project_path": project_path}
-                )
+                if not project_path or project_path.strip() == "":
+                    return "❌ No project path provided"
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('success'):
-                        print(f"✅ [GRADIO] Favorite toggled successfully for: {project_path}")
-                        return f"✅ Favorite toggled for project"
-                    else:
-                        print(f"❌ [GRADIO] Failed to toggle favorite: {data.get('error')}")
-                        return f"❌ Failed to toggle favorite: {data.get('error')}"
-                else:
-                    print(f"❌ [GRADIO] API request failed: {response.status_code}")
-                    return f"❌ API request failed: {response.status_code}"
+                # Use database directly to avoid ad blocker issues
+                new_status = db.toggle_favorite_status(project_path)
+                status_text = "added to favorites" if new_status else "removed from favorites"
+                
+                print(f"✅ [GRADIO] Project {status_text}: {project_path}")
+                
+                # Reload projects to update UI state
+                launcher.load_projects_from_db()
+                
+                return f"✅ Project {status_text}"
                     
             except Exception as e:
-                print(f"❌ [GRADIO] Error toggling favorite: {str(e)}")
-                return f"❌ Error toggling favorite: {str(e)}"
+                error_msg = f"Error toggling favorite: {str(e)}"
+                print(f"❌ [GRADIO] {error_msg}")
+                return f"❌ {error_msg}"
         
         def handle_toggle_hidden(project_path):
-            """Handle toggling hidden status via Gradio"""
+            """Handle toggling hidden status via Gradio - direct database access"""
             try:
-                import requests
-                response = requests.post(
-                    f"http://localhost:{args.api_port}/api/toggle-hidden",
-                    headers={"Content-Type": "application/json"},
-                    json={"project_path": project_path}
-                )
+                if not project_path or project_path.strip() == "":
+                    return "❌ No project path provided"
                 
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('success'):
-                        print(f"✅ [GRADIO] Hidden status toggled successfully for: {project_path}")
-                        return f"✅ Hidden status toggled for project"
-                    else:
-                        print(f"❌ [GRADIO] Failed to toggle hidden: {data.get('error')}")
-                        return f"❌ Failed to toggle hidden: {data.get('error')}"
-                else:
-                    print(f"❌ [GRADIO] API request failed: {response.status_code}")
-                    return f"❌ API request failed: {response.status_code}"
+                # Use database directly to avoid ad blocker issues  
+                new_status = db.toggle_hidden_status(project_path)
+                status_text = "hidden" if new_status else "visible"
+                
+                print(f"✅ [GRADIO] Project set to {status_text}: {project_path}")
+                
+                # Reload projects to update UI state
+                launcher.load_projects_from_db()
+                
+                return f"✅ Project set to {status_text}"
                     
             except Exception as e:
-                print(f"❌ [GRADIO] Error toggling hidden: {str(e)}")
-                return f"❌ Error toggling hidden: {str(e)}"
+                error_msg = f"Error toggling hidden status: {str(e)}"
+                print(f"❌ [GRADIO] {error_msg}")
+                return f"❌ {error_msg}"
         
         # Tab switching functions
         def switch_to_app_list():
@@ -1495,17 +1519,17 @@ def main():
             ]
         )
         
-        # Wire up Gradio components for fallback favorite/hidden toggles
+        # Wire up Gradio components for favorite/hidden toggles  
         favorite_trigger.click(
             handle_toggle_favorite,
             inputs=[toggle_favorite_path],
-            outputs=[]  # We'll handle UI updates within the function
+            outputs=[]  # No direct UI updates - JavaScript will handle refresh
         )
         
         hidden_trigger.click(
             handle_toggle_hidden,
             inputs=[toggle_hidden_path],
-            outputs=[]  # We'll handle UI updates within the function
+            outputs=[]  # No direct UI updates - JavaScript will handle refresh
         )
         
         # Wire up fixed search bar events
@@ -1664,28 +1688,40 @@ def main():
                     }}
                 }};
                 
-                // Define global setupLaunchButtons function
-                window.setupLaunchButtons = function() {{
-                    // Find all launch buttons and attach Gradio-native event handlers
-                    const launchButtons = document.querySelectorAll('[id^="launch_btn_"]');
-                    console.log('🚀 [JS] Setting up', launchButtons.length, 'launch buttons with Gradio handlers');
-                    
-                    launchButtons.forEach(button => {{
-                        // Remove any existing click handlers to avoid duplicates
-                        button.replaceWith(button.cloneNode(true));
-                        const newButton = document.getElementById(button.id);
-                        
-                        newButton.addEventListener('click', function() {{
+                        // Define global setupLaunchButtons function
+        window.setupLaunchButtons = function() {{
+            // Find all launch buttons and attach Gradio-native event handlers
+            const launchButtons = document.querySelectorAll('[id^="launch_btn_"]:not(.gradio-configured)');
+            if (launchButtons.length === 0) {{
+                return; // No new buttons to configure
+            }}
+            
+            console.log('🚀 [JS] Setting up', launchButtons.length, 'NEW launch buttons with Gradio handlers');
+            
+            launchButtons.forEach(button => {{
+                // Mark as configured to prevent re-processing
+                button.classList.add('gradio-configured');
+                
+                button.addEventListener('click', function() {{
                             const projectName = this.getAttribute('data-project-name');
                             const projectPath = this.getAttribute('data-project-path');
                             const projectIndex = this.getAttribute('data-project-index');
                             
-                            console.log('🚀 [JS] Launch request via Gradio:', projectIndex, projectName, 'at', projectPath);
-                            
-                            // Use Gradio's native component system - no external API calls
-                            const nameInput = document.querySelector('#project_name_data input, #project_name_data textarea');
-                            const pathInput = document.querySelector('#project_path_data input, #project_path_data textarea');
-                            const launchBtn = document.querySelector('#launch_trigger');
+                                                console.log('🚀 [JS] Launch request via Gradio:', projectIndex, projectName, 'at', projectPath);
+                    
+                    // Use Gradio's native component system - no external API calls
+                    const nameInput = document.querySelector('#project_name_data input, #project_name_data textarea');
+                    const pathInput = document.querySelector('#project_path_data input, #project_path_data textarea');
+                    const launchBtn = document.querySelector('#launch_trigger');
+                    
+                    console.log('🔍 [JS] Component search results:', {{
+                        nameInput: nameInput ? 'FOUND' : 'MISSING',
+                        pathInput: pathInput ? 'FOUND' : 'MISSING', 
+                        launchBtn: launchBtn ? 'FOUND' : 'MISSING',
+                        nameInputDetails: nameInput ? nameInput.tagName + '#' + nameInput.id : 'null',
+                        pathInputDetails: pathInput ? pathInput.tagName + '#' + pathInput.id : 'null',
+                        launchBtnDetails: launchBtn ? launchBtn.tagName + '#' + launchBtn.id : 'null'
+                    }});
                             
                             if (nameInput && pathInput && launchBtn) {{
                                 // Set values in hidden Gradio components
@@ -1697,37 +1733,91 @@ def main():
                                 pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
                                 pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
                                 
-                                // Trigger Gradio launch button
-                                setTimeout(() => {{
-                                    launchBtn.click();
-                                    console.log('✅ [JS] Launch triggered via Gradio components');
-                                }}, 100);
-                            }} else {{
-                                console.error('❌ [JS] Could not find Gradio launch components');
-                                console.log('Available elements:', {{
-                                    nameInput: nameInput ? 'found' : 'missing',
-                                    pathInput: pathInput ? 'found' : 'missing',
-                                    launchBtn: launchBtn ? 'found' : 'missing'
-                                }});
-                            }}
+                                                        // Trigger Gradio launch button
+                        setTimeout(() => {{
+                            launchBtn.click();
+                            console.log('✅ [JS] Launch triggered via Gradio components');
+                        }}, 100);
+                    }} else {{
+                        console.error('❌ [JS] Could not find Gradio launch components');
+                        console.log('Available elements:', {{
+                            nameInput: nameInput ? 'found' : 'missing',
+                            pathInput: pathInput ? 'found' : 'missing',
+                            launchBtn: launchBtn ? 'found' : 'missing'
                         }});
-                    }});
-                }};
+                    }}
+                }});
+            }});
+            
+            console.log('✅ [JS] Configured', launchButtons.length, 'launch buttons for Gradio communication');
+        }};
                 
                 // Override global toggleFavorite and toggleHidden with Gradio-native versions
                 window.toggleFavorite = function(projectPath) {{
                     console.log('🌟 [JS] Toggle favorite via Gradio for:', projectPath);
-                    // Simply trigger a refresh for now - favorite functionality can be added later
-                    if (window.refreshProjects) {{
-                        window.refreshProjects();
+                    
+                    // Use hidden Gradio components to avoid ad blocker interference
+                    const pathInput = document.querySelector('#toggle_favorite_path input, #toggle_favorite_path textarea');
+                    const favoriteBtn = document.querySelector('#favorite_trigger');
+                    
+                    if (pathInput && favoriteBtn) {{
+                        // Set the project path in hidden input
+                        pathInput.value = projectPath;
+                        pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        
+                        // Trigger the hidden button
+                        setTimeout(() => {{
+                            favoriteBtn.click();
+                            console.log('✅ [JS] Favorite toggle triggered via Gradio components');
+                            
+                            // Refresh projects after a short delay
+                            setTimeout(() => {{
+                                if (window.refreshProjects) {{
+                                    window.refreshProjects();
+                                }}
+                            }}, 500);
+                        }}, 100);
+                    }} else {{
+                        console.error('❌ [JS] Could not find Gradio favorite components');
+                        console.log('Available elements:', {{
+                            pathInput: pathInput ? 'found' : 'missing',
+                            favoriteBtn: favoriteBtn ? 'found' : 'missing'
+                        }});
                     }}
                 }};
                 
                 window.toggleHidden = function(projectPath) {{
                     console.log('👻 [JS] Toggle hidden via Gradio for:', projectPath);
-                    // Simply trigger a refresh for now - hidden functionality can be added later
-                    if (window.refreshProjects) {{
-                        window.refreshProjects();
+                    
+                    // Use hidden Gradio components to avoid ad blocker interference
+                    const pathInput = document.querySelector('#toggle_hidden_path input, #toggle_hidden_path textarea');
+                    const hiddenBtn = document.querySelector('#hidden_trigger');
+                    
+                    if (pathInput && hiddenBtn) {{
+                        // Set the project path in hidden input
+                        pathInput.value = projectPath;
+                        pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                        pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                        
+                        // Trigger the hidden button
+                        setTimeout(() => {{
+                            hiddenBtn.click();
+                            console.log('✅ [JS] Hidden toggle triggered via Gradio components');
+                            
+                            // Refresh projects after a short delay
+                            setTimeout(() => {{
+                                if (window.refreshProjects) {{
+                                    window.refreshProjects();
+                                }}
+                            }}, 500);
+                        }}, 100);
+                    }} else {{
+                        console.error('❌ [JS] Could not find Gradio hidden components');
+                        console.log('Available elements:', {{
+                            pathInput: pathInput ? 'found' : 'missing',
+                            hiddenBtn: hiddenBtn ? 'found' : 'missing'
+                        }});
                     }}
                 }};
                 
@@ -1737,28 +1827,36 @@ def main():
                     console.log('🚀 [JS] Launch buttons configured for Gradio-native handling');
                 }}, 1000);
                 
-                // Re-setup when projects grid updates  
-                const observer = new MutationObserver((mutations) => {{
-                    let shouldResetup = false;
-                    mutations.forEach((mutation) => {{
-                        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {{
-                            mutation.addedNodes.forEach((node) => {{
-                                if (node.nodeType === 1 && (
-                                    (node.id && node.id.startsWith('launch_btn_')) || 
-                                    (node.querySelector && node.querySelector('[id^="launch_btn_"]'))
-                                )) {{
-                                    shouldResetup = true;
-                                }}
-                            }});
+                        // Re-setup when projects grid updates (debounced to prevent infinite loops)
+        let setupTimeout = null;
+        const observer = new MutationObserver((mutations) => {{
+            let hasNewLaunchButtons = false;
+            
+            mutations.forEach((mutation) => {{
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {{
+                    mutation.addedNodes.forEach((node) => {{
+                        if (node.nodeType === 1) {{
+                            // Check if this node or its children contain NEW launch buttons (not already configured)
+                            const newButtons = (node.id && node.id.startsWith('launch_btn_') && !node.classList.contains('gradio-configured')) ||
+                                             (node.querySelector && node.querySelector('[id^="launch_btn_"]:not(.gradio-configured)'));
+                            if (newButtons) {{
+                                hasNewLaunchButtons = true;
+                            }}
                         }}
                     }});
-                    if (shouldResetup) {{
-                        setTimeout(() => {{
-                            window.setupLaunchButtons();
-                        }}, 100);
-                    }}
-                }});
-                observer.observe(document.body, {{ childList: true, subtree: true }});
+                }}
+            }});
+            
+            if (hasNewLaunchButtons) {{
+                // Debounce to prevent rapid firing
+                clearTimeout(setupTimeout);
+                setupTimeout = setTimeout(() => {{
+                    console.log('🔄 [JS] New launch buttons detected, configuring...');
+                    window.setupLaunchButtons();
+                }}, 200);
+            }}
+        }});
+        observer.observe(document.body, {{ childList: true, subtree: true }});
                 
                 console.log('🌟 [JS] Global functions loaded via app.load():', {{
                     toggleFavorite: typeof window.toggleFavorite,
