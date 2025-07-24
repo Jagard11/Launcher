@@ -98,14 +98,29 @@ fi
 
 # Kill any existing instances
 print_color $BLUE "🔍 Checking for existing launcher instances..."
-if pgrep -f "enhanced_launcher.py" > /dev/null; then
-    print_color $YELLOW "⚠️  Found existing launcher process"
-    read -p "Kill existing process and continue? (y/N): " -n 1 -r
+
+# Check for any launcher processes
+EXISTING_PROCESSES=$(pgrep -f "persistent_launcher.py\|enhanced_launcher.py" | wc -l)
+
+if [ "$EXISTING_PROCESSES" -gt 0 ]; then
+    print_color $YELLOW "⚠️  Found $EXISTING_PROCESSES existing launcher process(es)"
+    
+    # Show which ports are in use
+    if command -v lsof &> /dev/null; then
+        USED_PORTS=$(lsof -i :7870-7880 -t 2>/dev/null | wc -l)
+        if [ "$USED_PORTS" -gt 0 ]; then
+            print_color $YELLOW "📱 Ports 7870-7880 in use: $USED_PORTS"
+            lsof -i :7870-7880 2>/dev/null | grep LISTEN | head -3
+        fi
+    fi
+    
+    read -p "Kill existing processes and continue? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        pkill -f "enhanced_launcher.py"
-        print_color $GREEN "✅ Stopped existing process"
-        sleep 2
+        pkill -f "persistent_launcher.py" 2>/dev/null
+        pkill -f "enhanced_launcher.py" 2>/dev/null
+        print_color $GREEN "✅ Stopped existing processes"
+        sleep 3
     else
         print_color $YELLOW "❌ Exiting to avoid conflicts"
         exit 1
@@ -123,13 +138,14 @@ fi
 
 print_color $GREEN "
 🚀 Starting Enhanced AI Project Launcher...
-📱 Web interface will be available at: http://localhost:7861
+📱 Web interface will be available at: http://localhost:7870-7880 (first available port)
 💡 Features enabled:
    - Automatic project discovery
    - Environment detection (conda, venv, poetry, etc.)
    - AI-powered project descriptions (if Ollama available)
    - One-click project launching
    - Visual project icons
+   - Real-time search and filtering
 
 Press Ctrl+C to stop the launcher
 "
