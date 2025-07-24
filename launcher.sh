@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# AI Project Launcher - Enhanced Mode
-# Launch script for the AI Project Launcher application
+# AI Project Launcher - Unified Mode
+# Launch script for the Unified AI Project Launcher application
 
 set -e  # Exit on any error
 
@@ -20,13 +20,13 @@ print_color() {
 
 # Print banner
 print_color $PURPLE "
-🚀 AI Project Launcher - Enhanced Mode
-======================================
+🚀 AI Project Launcher - Unified Mode
+====================================
 "
 
 # Check if we're in the right directory
-if [ ! -f "enhanced_launcher.py" ]; then
-    print_color $RED "❌ Error: enhanced_launcher.py not found!"
+if [ ! -f "unified_launcher.py" ]; then
+    print_color $RED "❌ Error: unified_launcher.py not found!"
     print_color $YELLOW "   Please run this script from the AI Launcher directory."
     exit 1
 fi
@@ -100,7 +100,7 @@ fi
 print_color $BLUE "🔍 Checking for existing launcher instances..."
 
 # Check for any launcher processes
-EXISTING_PROCESSES=$(pgrep -f "persistent_launcher.py\|enhanced_launcher.py" | wc -l)
+EXISTING_PROCESSES=$(pgrep -f "unified_launcher.py\|persistent_launcher.py\|enhanced_launcher.py" | wc -l)
 
 if [ "$EXISTING_PROCESSES" -gt 0 ]; then
     print_color $YELLOW "⚠️  Found $EXISTING_PROCESSES existing launcher process(es)"
@@ -117,6 +117,7 @@ if [ "$EXISTING_PROCESSES" -gt 0 ]; then
     read -p "Kill existing processes and continue? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
+        pkill -f "unified_launcher.py" 2>/dev/null
         pkill -f "persistent_launcher.py" 2>/dev/null
         pkill -f "enhanced_launcher.py" 2>/dev/null
         print_color $GREEN "✅ Stopped existing processes"
@@ -137,15 +138,18 @@ else
 fi
 
 print_color $GREEN "
-🚀 Starting Enhanced AI Project Launcher...
+🚀 Starting Unified AI Project Launcher...
 📱 Web interface will be available at: http://localhost:7870-7880 (first available port)
 💡 Features enabled:
+   - Tabbed interface (App List + Database Viewer)
    - Automatic project discovery
    - Environment detection (conda, venv, poetry, etc.)
    - AI-powered project descriptions (if Ollama available)
    - One-click project launching
    - Visual project icons
    - Real-time search and filtering
+   - Complete database inspection tools
+   - Command-line arguments support (--verbose, --port, etc.)
 
 Press Ctrl+C to stop the launcher
 "
@@ -154,10 +158,13 @@ Press Ctrl+C to stop the launcher
 cd "$(dirname "$0")"
 
 # Launch the application
-if [ -f "persistent_launcher.py" ]; then
-    print_color $BLUE "🚀 Launching Persistent AI Launcher (with background scanning)..."
+if [ -f "unified_launcher.py" ]; then
+    print_color $BLUE "🚀 Launching Unified AI Launcher (with tabs and all features)..."
+    exec python3 unified_launcher.py
+elif [ -f "persistent_launcher.py" ]; then
+    print_color $YELLOW "⚠️  Unified launcher not found, using persistent launcher..."
     exec python3 persistent_launcher.py
 else
-    print_color $YELLOW "⚠️  Persistent launcher not found, using enhanced launcher..."
+    print_color $YELLOW "⚠️  No launcher found, using enhanced launcher..."
     exec python3 enhanced_launcher.py
 fi 

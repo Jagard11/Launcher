@@ -38,6 +38,14 @@ class ProjectDatabase:
                 last_scanned TIMESTAMP,
                 last_modified TIMESTAMP,
                 scan_duration REAL,
+                launch_command TEXT,
+                launch_type TEXT,
+                launch_working_directory TEXT,
+                launch_args TEXT,
+                launch_confidence REAL,
+                launch_notes TEXT,
+                launch_analysis_method TEXT,
+                launch_analyzed_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -66,6 +74,26 @@ class ProjectDatabase:
                 FOREIGN KEY (project_id) REFERENCES projects (id)
             )
         ''')
+        
+        # Add launch command columns to existing projects table if they don't exist
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        launch_columns = [
+            ('launch_command', 'TEXT'),
+            ('launch_type', 'TEXT'),
+            ('launch_working_directory', 'TEXT'),
+            ('launch_args', 'TEXT'),
+            ('launch_confidence', 'REAL'),
+            ('launch_notes', 'TEXT'),
+            ('launch_analysis_method', 'TEXT'),
+            ('launch_analyzed_at', 'TIMESTAMP')
+        ]
+        
+        for col_name, col_type in launch_columns:
+            if col_name not in columns:
+                cursor.execute(f'ALTER TABLE projects ADD COLUMN {col_name} {col_type}')
+                logger.info(f"Added column {col_name} to projects table")
         
         conn.commit()
         conn.close()

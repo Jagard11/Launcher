@@ -7,11 +7,14 @@ import threading
 from pathlib import Path
 from typing import Dict, List
 from datetime import datetime
+import platform
+import shutil
 
 from project_database import db
 from background_scanner import get_scanner
 from environment_detector import EnvironmentDetector
 from logger import logger
+from launch_api_server import start_api_server
 import subprocess
 
 class PersistentLauncher:
@@ -25,6 +28,69 @@ class PersistentLauncher:
         self.ui_needs_refresh = False
         self.last_ui_update = time.time()
         
+    def open_terminal(self, command):
+        """Opens a new terminal window and executes the given command - cross-platform"""
+        os_name = platform.system()
+        print(f"🚀 [TERMINAL] Opening terminal on {os_name} with command: {command[:100]}...")
+        logger.info(f"Opening terminal on {os_name}")
+        
+        try:
+            if os_name == "Windows":
+                # Opens a new cmd window, runs the command, and keeps it open (/k)
+                subprocess.Popen(['cmd', '/c', 'start', 'cmd.exe', '/k', command])
+            elif os_name == "Linux":
+                # Try different terminal emulators in order of preference
+                terminals_to_try = [
+                    'gnome-terminal',
+                    'konsole', 
+                    'xfce4-terminal',
+                    'mate-terminal',
+                    'lxterminal',
+                    'terminator',
+                    'xterm'
+                ]
+                
+                terminal_found = None
+                for terminal in terminals_to_try:
+                    if shutil.which(terminal):
+                        terminal_found = terminal
+                        print(f"🚀 [TERMINAL] Found terminal: {terminal}")
+                        break
+                
+                if not terminal_found:
+                    raise OSError("No suitable terminal emulator found. Please install gnome-terminal, konsole, or xterm.")
+                
+                # Execute command based on terminal type
+                if terminal_found == 'gnome-terminal':
+                    subprocess.Popen([terminal_found, '--', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found == 'konsole':
+                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found in ['xfce4-terminal', 'mate-terminal', 'lxterminal']:
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                elif terminal_found == 'terminator':
+                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found == 'xterm':
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                else:
+                    # Fallback for any other terminal
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    
+            elif os_name == "Darwin":  # macOS
+                # Uses AppleScript to open Terminal.app and run the command
+                subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "{command}"'])
+            else:
+                raise OSError(f"Unsupported operating system: {os_name}")
+                
+            print(f"🚀 [TERMINAL] Terminal opened successfully")
+            logger.info("Terminal opened successfully")
+            return "Terminal launched successfully!"
+            
+        except Exception as e:
+            error_msg = f"Error launching terminal: {str(e)}"
+            print(f"🚀 [TERMINAL] ERROR: {error_msg}")
+            logger.error(error_msg)
+            return error_msg
+
     def initialize(self):
         """Initialize the launcher - load from database and start background scanner"""
         logger.info("Initializing Persistent AI Launcher...")
@@ -185,7 +251,7 @@ class PersistentLauncher:
         </details>
         """
     
-    def create_project_card(self, project: Dict, index: int) -> str:
+    def create_project_card(self, project: Dict, index: int, api_port: int = 7871) -> str:
         """Create HTML for a single project card"""
         # Get status indicators
         env_type = project.get('environment_type', 'unknown')
@@ -257,7 +323,9 @@ class PersistentLauncher:
                         <h3 style="margin: 0; font-size: 16px; color: #2c3e50; font-weight: 600; flex: 1;">
                             {str(project.get('name', 'Unknown Project'))}
                         </h3>
-                        <button id="{launch_id}" onclick="launchProject('{project_name_safe}', '{project_path_safe}')" style="
+                        <a href="http://localhost:{api_port}/launch?project_id={index}" 
+                           target="_blank" 
+                           style="
                             background: linear-gradient(135deg, #007bff, #0056b3);
                             color: white; 
                             border: none; 
@@ -269,10 +337,12 @@ class PersistentLauncher:
                             box-shadow: 0 2px 4px rgba(0,123,255,0.3);
                             transition: all 0.2s ease;
                             margin-left: 12px;
+                            text-decoration: none;
+                            display: inline-block;
                         " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,123,255,0.4)'"
                            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,123,255,0.3)'">
                             🚀 Launch
-                        </button>
+                        </a>
                     </div>
                     <div style="margin-bottom: 8px;">
                         {' '.join(status_badges)}
@@ -292,7 +362,7 @@ class PersistentLauncher:
         </div>
         """
     
-    def create_projects_grid(self, projects: List[Dict]) -> str:
+    def create_projects_grid(self, projects: List[Dict], api_port: int = 7871) -> str:
         """Create responsive grid of project cards"""
         if not projects:
             return """
@@ -312,200 +382,113 @@ class PersistentLauncher:
         """
         
         for i, project in enumerate(projects):
-            grid_html += self.create_project_card(project, i)
+            grid_html += self.create_project_card(project, i, api_port)
         
         grid_html += "</div>"
         
-        # Add JavaScript functions for interactivity  
-        grid_html += """
-        <script>
-        // Global launch counter for tracking
-        window.launchCounter = 0;
-        
-        function launchProject(projectName, projectPath) {
-            window.launchCounter++;
-            const launchId = window.launchCounter;
-            
-            // Log launch attempt to browser console
-            console.log(`🚀 [LAUNCH] Button clicked for: ${projectName}`);
-            console.log(`🚀 [LAUNCH] Project path: ${projectPath}`);
-            console.log(`🚀 [LAUNCH] Launch ID: ${launchId}`);
-            console.log(`🚀 [LAUNCH] Timestamp: ${new Date().toISOString()}`);
-            
-            // Log button click (backend logging will happen when event is processed)
-            
-            // Show immediate feedback in output
-            const outputElement = document.querySelector('[id*="launch_output"] textarea') || 
-                                  document.querySelector('#launch_output textarea') ||
-                                  document.querySelector('textarea[placeholder*="Launch Output"]');
-            console.log(`🚀 [LAUNCH] Output element found:`, !!outputElement);
-            if (outputElement) {
-                outputElement.value = `🚀 Launching ${projectName}...`;
-                outputElement.dispatchEvent(new Event('input', { bubbles: true }));
-                console.log(`🚀 [LAUNCH] Updated output display`);
-            }
-            
-            // Method 1: Try hidden input approach
-            const launchInput = document.querySelector('[id*="instant_launch_data"]') || 
-                               document.querySelector('#instant_launch_data');
-            console.log(`🚀 [LAUNCH] Method 1 - Hidden input found:`, !!launchInput);
-            if (launchInput) {
-                const launchData = JSON.stringify({
-                    project_name: projectName.replace(/&apos;/g, "'"),
-                    project_path: projectPath.replace(/&apos;/g, "'"),
-                    launch_id: launchId
-                });
-                
-                console.log(`🚀 [LAUNCH] Method 1 - Setting data:`, launchData);
-                launchInput.value = launchData;
-                launchInput.dispatchEvent(new Event('input', { bubbles: true }));
-                console.log(`🚀 [LAUNCH] Method 1 - Event dispatched`);
-                return false;
-            }
-            
-            // Method 2: Try alternative approach with separate inputs
-            const nameInput = document.querySelector('[id*="project_name_data"]') || 
-                             document.querySelector('#project_name_data');
-            const pathInput = document.querySelector('[id*="project_path_data"]') || 
-                             document.querySelector('#project_path_data');
-            const triggerBtn = document.querySelector('[id*="launch_trigger"]') || 
-                              document.querySelector('#launch_trigger');
-            
-            console.log(`🚀 [LAUNCH] Method 2 - Elements found:`, {
-                name: !!nameInput, 
-                path: !!pathInput, 
-                trigger: !!triggerBtn
-            });
-            
-            if (nameInput && pathInput && triggerBtn) {
-                nameInput.value = projectName.replace(/&apos;/g, "'");
-                pathInput.value = projectPath.replace(/&apos;/g, "'");
-                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-                pathInput.dispatchEvent(new Event('input', { bubbles: true }));
-                console.log(`🚀 [LAUNCH] Method 2 - Values set, triggering button click`);
-                setTimeout(() => {
-                    triggerBtn.click();
-                    console.log(`🚀 [LAUNCH] Method 2 - Button clicked`);
-                }, 100);
-                return false;
-            }
-            
-            console.error(`🚀 [LAUNCH] ERROR: No valid launch method found!`);
-            console.log(`🚀 [LAUNCH] Available elements:`, {
-                hiddenInput: !!launchInput,
-                nameInput: !!nameInput,
-                pathInput: !!pathInput,
-                triggerBtn: !!triggerBtn,
-                outputElement: !!outputElement
-            });
-            
-            return false;
-                }
-        
-
-        </script>
-        """
+        # No JavaScript needed - using direct HTML links for API calls
         
         return grid_html
     
     def launch_project(self, project_path: str, project_name: str) -> str:
-        """Launch a project with its detected environment"""
-        print(f"🚀 [TERMINAL] ===== LAUNCH PROJECT =====")
+        """Launch a project using AI-generated launch command"""
+        print(f"🚀 [TERMINAL] ===== AI-POWERED LAUNCH =====")
         print(f"🚀 [TERMINAL] Project: {project_name}")
         print(f"🚀 [TERMINAL] Path: {project_path}")
         
         try:
-            print(f"🚀 [TERMINAL] Step 1: Detecting environment...")
+            print(f"🚀 [TERMINAL] Step 1: Getting project from database...")
+            # Get project data from database to access AI-generated launch command
+            project_data = db.get_project_by_path(project_path)
+            
+            if not project_data:
+                print(f"🚀 [TERMINAL] Project not found in database, using fallback...")
+                return self._fallback_launch(project_path, project_name)
+            
+            # Get AI-generated launch information
+            launch_command = project_data.get('launch_command')
+            launch_type = project_data.get('launch_type', 'unknown')
+            working_dir = project_data.get('launch_working_directory', '.')
+            launch_args = project_data.get('launch_args', '')
+            confidence = project_data.get('launch_confidence', 0.0)
+            analysis_method = project_data.get('launch_analysis_method', 'unknown')
+            
+            print(f"🚀 [TERMINAL] AI Analysis Method: {analysis_method}")
+            print(f"🚀 [TERMINAL] Launch Type: {launch_type}")
+            print(f"🚀 [TERMINAL] Confidence: {confidence:.2f}")
+            print(f"🚀 [TERMINAL] AI Command: {launch_command}")
+            
+            if not launch_command or confidence < 0.3:
+                print(f"🚀 [TERMINAL] Low confidence or missing AI command, using fallback...")
+                return self._fallback_launch(project_path, project_name)
+            
+            print(f"🚀 [TERMINAL] Step 2: Detecting environment...")
             env_detector = EnvironmentDetector()
             env_info = env_detector.detect_environment(project_path)
             
-            print(f"🚀 [TERMINAL] Environment detected: {env_info}")
             logger.launch_attempt(project_name, project_path, env_info['type'])
             
-            if env_info['type'] == 'none':
-                error_msg = f"No Python environment detected for {project_name}"
-                print(f"🚀 [TERMINAL] ERROR: {error_msg}")
-                logger.launch_error(project_name, error_msg)
-                return f"❌ {error_msg}"
+            print(f"🚀 [TERMINAL] Step 3: Building environment-aware command...")
             
-            print(f"🚀 [TERMINAL] Step 2: Finding main script...")
-            # Find main script
-            main_scripts = ['app.py', 'main.py', 'run.py', 'start.py', 'launch.py', 'webui.py']
-            script_path = None
+            # Combine working directory with project path
+            if working_dir == '.' or not working_dir:
+                full_working_dir = project_path
+            else:
+                full_working_dir = str(Path(project_path) / working_dir)
             
-            print(f"🚀 [TERMINAL] Checking for scripts: {main_scripts}")
-            for script in main_scripts:
-                potential_path = Path(project_path) / script
-                print(f"🚀 [TERMINAL]   Checking: {potential_path}")
-                if potential_path.exists():
-                    script_path = potential_path
-                    print(f"🚀 [TERMINAL]   FOUND: {script_path}")
-                    break
+            project_path_quoted = f'"{full_working_dir}"'
             
-            if not script_path:
-                print(f"🚀 [TERMINAL] No standard scripts found, looking for any .py files...")
-                # Try to find any Python file that might be the main one
-                py_files = list(Path(project_path).glob('*.py'))
-                print(f"🚀 [TERMINAL] Found .py files: {py_files}")
-                if py_files:
-                    script_path = py_files[0]
-                    print(f"🚀 [TERMINAL] Using fallback script: {script_path}")
-                else:
-                    error_msg = f"No Python script found in {project_name}"
-                    print(f"🚀 [TERMINAL] ERROR: {error_msg}")
-                    logger.launch_error(project_name, error_msg)
-                    return f"❌ {error_msg}"
+            # Add launch arguments if any
+            full_command = launch_command
+            if launch_args:
+                full_command += f" {launch_args}"
             
-            print(f"🚀 [TERMINAL] Step 3: Building launch command...")
-            # Launch command
-            script_name = script_path.name
-            project_path_quoted = f'"{project_path}"'
-            
-            print(f"🚀 [TERMINAL] Script to run: {script_name}")
+            print(f"🚀 [TERMINAL] Working Directory: {full_working_dir}")
+            print(f"🚀 [TERMINAL] Base Command: {full_command}")
             print(f"🚀 [TERMINAL] Environment type: {env_info['type']}")
             
+            # Build environment-specific terminal command
             if env_info['type'] == 'conda':
                 env_name = env_info.get('name', 'base')
-                cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && conda activate {env_name} && python3 {script_name}; exec bash"'
+                cmd = f'cd {project_path_quoted} && echo "🚀 Activating conda environment: {env_name}" && conda activate {env_name} && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
                 print(f"🚀 [TERMINAL] Conda environment: {env_name}")
             elif env_info['type'] == 'venv':
                 activate_path = env_info.get('activate_path', '')
                 activate_path_quoted = f'"{activate_path}"'
-                cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && source {activate_path_quoted} && python3 {script_name}; exec bash"'
+                cmd = f'cd {project_path_quoted} && echo "🚀 Activating virtual environment" && source {activate_path_quoted} && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
                 print(f"🚀 [TERMINAL] Virtual env activation: {activate_path}")
             elif env_info['type'] == 'poetry':
-                cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && poetry run python3 {script_name}; exec bash"'
+                cmd = f'cd {project_path_quoted} && echo "🚀 Using Poetry environment" && echo "🚀 Running: poetry run {full_command}" && poetry run {full_command}; echo "\\n📋 Press Enter to close..."; read'
                 print(f"🚀 [TERMINAL] Using Poetry environment")
             elif env_info['type'] == 'pipenv':
-                cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && pipenv run python3 {script_name}; exec bash"'
+                cmd = f'cd {project_path_quoted} && echo "🚀 Using Pipenv environment" && echo "🚀 Running: pipenv run {full_command}" && pipenv run {full_command}; echo "\\n📋 Press Enter to close..."; read'
                 print(f"🚀 [TERMINAL] Using Pipenv environment")
+            elif launch_type == 'docker':
+                # For docker commands, run them directly without Python environment
+                cmd = f'cd {project_path_quoted} && echo "🚀 Running Docker command" && echo "🚀 Command: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
+                print(f"🚀 [TERMINAL] Using Docker")
             else:
-                cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && python3 {script_name}; exec bash"'
-                print(f"🚀 [TERMINAL] Using system Python")
+                # Default: run with system Python or as-is for non-Python commands
+                if full_command.startswith('python'):
+                    cmd = f'cd {project_path_quoted} && echo "🚀 Using system Python" && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
+                else:
+                    cmd = f'cd {project_path_quoted} && echo "🚀 Running custom command" && echo "🚀 Command: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
+                print(f"🚀 [TERMINAL] Using system environment")
             
-            print(f"🚀 [TERMINAL] Step 4: Executing command...")
-            print(f"🚀 [TERMINAL] Command: {cmd}")
+            print(f"🚀 [TERMINAL] Step 4: Executing AI-generated command...")
+            print(f"🚀 [TERMINAL] Final Command: {cmd[:200]}...")
             
-            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print(f"🚀 [TERMINAL] Process started with PID: {process.pid}")
+            # Use the new cross-platform terminal opening function
+            terminal_result = self.open_terminal(cmd)
             
-            # Give it a moment to start
-            import time
-            time.sleep(0.5)
-            
-            # Check if process started successfully
-            if process.poll() is None:
-                print(f"🚀 [TERMINAL] SUCCESS: Process is running")
+            if "Terminal launched successfully!" in terminal_result:
+                print(f"🚀 [TERMINAL] SUCCESS: AI-launched terminal opened")
                 logger.launch_success(project_name)
-                return f"✅ Launched {project_name} (Environment: {env_info['type']})"
+                return f"✅ AI-Launched {project_name} ({launch_type}, confidence: {confidence:.1f}) - Terminal opened"
             else:
-                stdout, stderr = process.communicate()
-                error_details = stderr.decode() if stderr else "Unknown error"
-                print(f"🚀 [TERMINAL] ERROR: Process failed to start")
-                print(f"🚀 [TERMINAL] Return code: {process.returncode}")
-                print(f"🚀 [TERMINAL] Stderr: {error_details}")
-                logger.launch_error(project_name, f"Process failed: {error_details}")
-                return f"❌ Failed to start {project_name}: {error_details}"
+                print(f"🚀 [TERMINAL] ERROR: Failed to open terminal")
+                logger.launch_error(project_name, f"AI launch failed: {terminal_result}")
+                return f"❌ Failed to start {project_name}: {terminal_result}"
             
         except Exception as e:
             error_msg = str(e)
@@ -514,6 +497,67 @@ class PersistentLauncher:
             print(f"🚀 [TERMINAL] Traceback: {traceback.format_exc()}")
             logger.launch_error(project_name, error_msg)
             return f"❌ Error launching project: {error_msg}"
+    
+    def _fallback_launch(self, project_path: str, project_name: str) -> str:
+        """Fallback launch method using traditional approach"""
+        print(f"🚀 [TERMINAL] Using fallback launch method...")
+        
+        try:
+            env_detector = EnvironmentDetector()
+            env_info = env_detector.detect_environment(project_path)
+            
+            if env_info['type'] == 'none':
+                error_msg = f"No Python environment detected for {project_name}"
+                print(f"🚀 [TERMINAL] ERROR: {error_msg}")
+                logger.launch_error(project_name, error_msg)
+                return f"❌ {error_msg}"
+            
+            # Find main script using traditional method
+            main_scripts = ['app.py', 'main.py', 'run.py', 'start.py', 'launch.py', 'webui.py']
+            script_path = None
+            
+            for script in main_scripts:
+                potential_path = Path(project_path) / script
+                if potential_path.exists():
+                    script_path = potential_path
+                    break
+            
+            if not script_path:
+                # Try to find any Python file
+                py_files = list(Path(project_path).glob('*.py'))
+                if py_files:
+                    script_path = py_files[0]
+                else:
+                    error_msg = f"No Python script found in {project_name}"
+                    logger.launch_error(project_name, error_msg)
+                    return f"❌ {error_msg}"
+            
+            script_name = script_path.name
+            project_path_quoted = f'"{project_path}"'
+            
+            if env_info['type'] == 'conda':
+                env_name = env_info.get('name', 'base')
+                cmd = f'cd {project_path_quoted} && conda activate {env_name} && python3 {script_name}; exec bash'
+            elif env_info['type'] == 'venv':
+                activate_path = env_info.get('activate_path', '')
+                cmd = f'cd {project_path_quoted} && source "{activate_path}" && python3 {script_name}; exec bash'
+            else:
+                cmd = f'cd {project_path_quoted} && python3 {script_name}; exec bash'
+            
+            # Use the new cross-platform terminal opening function
+            terminal_result = self.open_terminal(cmd)
+            
+            if "Terminal launched successfully!" in terminal_result:
+                logger.launch_success(project_name)
+                return f"✅ Launched {project_name} (Fallback method) - Terminal opened"
+            else:
+                logger.launch_error(project_name, f"Fallback launch failed: {terminal_result}")
+                return f"❌ Fallback launch failed: {terminal_result}"
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.launch_error(project_name, error_msg)
+            return f"❌ Error in fallback launch: {error_msg}"
 
     def launch_project_background(self, project_path: str, project_name: str, launch_id: int = 0) -> str:
         """Launch a project in the background without blocking the UI"""
@@ -552,13 +596,18 @@ def load_config():
     with open('config.json', 'r') as f:
         return json.load(f)
 
-def main():
+def main(api_port=7871):
     """Main application entry point"""
     config = load_config()
     launcher = PersistentLauncher(config)
     
     # Initialize the launcher
     launcher.initialize()
+    
+    # Start the API server with launcher instance
+    print(f"🚀 [TERMINAL] Starting Launch API Server on port {api_port}...")
+    api_server_thread = start_api_server(port=api_port, launcher=launcher)
+    print(f"🚀 [TERMINAL] Launch API Server started on port {api_port}")
     
     # Get initial stats
     stats = db.get_stats()
@@ -763,7 +812,7 @@ def main():
                     refresh_btn = gr.Button("♻️ Refresh", size="sm")
         
         # Projects display
-        projects_display = gr.HTML(launcher.create_projects_grid(launcher.current_projects))
+        projects_display = gr.HTML(launcher.create_projects_grid(launcher.current_projects, api_port))
         
         # Launch output for showing launch results
         with gr.Row():
@@ -777,6 +826,57 @@ def main():
             project_path_input = gr.Textbox(elem_id="project_path_data")
             launch_trigger = gr.Button("Launch", elem_id="launch_trigger")
         
+        # TEST: Simple communication test
+        with gr.Row():
+            test_input = gr.Textbox(label="Communication Test", placeholder="Type anything and press Enter to test", elem_id="test_input")
+            test_output = gr.Textbox(label="Test Output", interactive=False)
+        
+        # TEST: JavaScript function test
+        with gr.Row():
+            gr.HTML(f"""
+            <div style="padding: 10px; border: 2px solid #007bff; border-radius: 8px; background: #f0f8ff;">
+                <h4>🧪 Launch System Diagnostics</h4>
+                <button onclick="console.log('TEST: Calling launchProject...'); launchProject('TEST_PROJECT', '/test/path'); return false;" 
+                        style="background: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin: 5px;">
+                    Test launchProject() Function
+                </button>
+                <button onclick="console.log('TEST: Console test'); alert('Console test works!'); return false;" 
+                        style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin: 5px;">
+                    Test Console/Alert
+                </button>
+                <button onclick="fetch('http://localhost:{api_port}/test').then(r=>r.json()).then(d=>console.log('API Test:', d)).catch(e=>console.log('API Error:', e)); return false;" 
+                        style="background: #ffc107; color: black; border: none; padding: 8px 16px; border-radius: 4px; margin: 5px;">
+                    Test API Connection
+                </button>
+                <p style="font-size: 12px; color: #666; margin: 5px 0;">
+                    Click buttons above and check browser console (F12) + terminal for debug logs.
+                </p>
+                <p style="font-size: 12px; color: #666; margin: 5px 0;">
+                    <strong>API URL:</strong> http://localhost:{api_port}/launch
+                </p>
+            </div>
+            """)
+        
+        def test_communication(test_message):
+            """Simple test to verify JavaScript→Python communication"""
+            print(f"🧪 [TEST] ==========================================")
+            print(f"🧪 [TEST] GRADIO COMMUNICATION TEST")
+            print(f"🧪 [TEST] Message received: {repr(test_message)}")
+            print(f"🧪 [TEST] Timestamp: {time.strftime('%H:%M:%S')}")
+            print(f"🧪 [TEST] ==========================================")
+            logger.info(f"🧪 TEST: Received message: {test_message}")
+            return f"✅ Received: {test_message} at {time.strftime('%H:%M:%S')}"
+        
+        # Button click logging now handled by API server
+        
+        test_input.submit(
+            test_communication,
+            inputs=[test_input],
+            outputs=[test_output]
+        )
+        
+        # Launch buttons now work via direct API calls - no complex Gradio communication needed
+        
         # Advanced controls
         with gr.Accordion("🛠️ Advanced Controls", open=False):
             with gr.Row():
@@ -788,7 +888,7 @@ def main():
         # Event handlers
         def refresh_display():
             launcher.load_projects_from_db()
-            grid_html = launcher.create_projects_grid(launcher.current_projects)
+            grid_html = launcher.create_projects_grid(launcher.current_projects, api_port)
             stats = db.get_stats()
             status_md = f"**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
             launcher.ui_needs_refresh = False
@@ -809,7 +909,7 @@ def main():
                 print(f"🚀 [TERMINAL] Search triggered with query: '{search_query}'")
                 
                 filtered_projects = launcher.filter_projects(search_query)
-                grid_html = launcher.create_projects_grid(filtered_projects)
+                grid_html = launcher.create_projects_grid(filtered_projects, api_port)
                 
                 # Update status to show filtered count
                 total_projects = len(launcher.current_projects)
@@ -842,21 +942,24 @@ def main():
         
         def clear_search():
             """Clear the search and show all projects"""
-            grid_html = launcher.create_projects_grid(launcher.current_projects)
+            grid_html = launcher.create_projects_grid(launcher.current_projects, api_port)
             stats = db.get_stats()
             status_md = f"**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
             return "", grid_html, status_md
         
         def handle_instant_launch(launch_data_json):
             """Handle instant project launches from the UI"""
-            print(f"\n🚀 [TERMINAL] handle_instant_launch() called")
+            print(f"\n🚀 [TERMINAL] === LAUNCH BUTTON CLICKED ===")
+            print(f"🚀 [TERMINAL] handle_instant_launch() called")
             print(f"🚀 [TERMINAL] Raw data received: {repr(launch_data_json)}")
-            logger.info(f"🚀 handle_instant_launch called with data: {launch_data_json}")
+            print(f"🚀 [TERMINAL] Data type: {type(launch_data_json)}")
+            print(f"🚀 [TERMINAL] Data length: {len(str(launch_data_json)) if launch_data_json else 0}")
+            logger.info(f"🚀 LAUNCH BUTTON CLICKED - handle_instant_launch called with data: {launch_data_json}")
             
             if not launch_data_json:
                 print(f"🚀 [TERMINAL] ERROR: No launch data provided")
-                logger.warning("No launch data provided")
-                return "No launch data"
+                logger.warning("LAUNCH BUTTON: No launch data provided")
+                return "❌ No launch data received"
                 
             try:
                 import json
@@ -937,6 +1040,30 @@ def main():
             outputs=[projects_display, status_display]
         )
         
+        # Add debug logging for input changes
+        def log_input_change(value, component_name):
+            print(f"🚀 [TERMINAL] Input change detected - {component_name}: {repr(value)}")
+            logger.info(f"Input change - {component_name}: {value}")
+            return value
+        
+        instant_launch_input.change(
+            lambda x: log_input_change(x, "instant_launch_input"),
+            inputs=[instant_launch_input],
+            outputs=[]
+        )
+        
+        project_name_input.change(
+            lambda x: log_input_change(x, "project_name_input"),
+            inputs=[project_name_input],
+            outputs=[]
+        )
+        
+        project_path_input.change(
+            lambda x: log_input_change(x, "project_path_input"),
+            inputs=[project_path_input],
+            outputs=[]
+        )
+        
         # Connect clear search button
         clear_search_btn.click(
             clear_search,
@@ -953,14 +1080,16 @@ def main():
         # Handle instant launches - Method 2: Separate inputs + trigger
         def handle_separate_launch(project_name, project_path):
             """Handle launch using separate name/path inputs"""
-            print(f"\n🚀 [TERMINAL] handle_separate_launch() called")
-            print(f"🚀 [TERMINAL] Separate method - Project: {project_name}")
-            print(f"🚀 [TERMINAL] Separate method - Path: {project_path}")
-            logger.info(f"🚀 handle_separate_launch called - Name: {project_name}, Path: {project_path}")
+            print(f"\n🚀 [TERMINAL] === LAUNCH BUTTON CLICKED (SEPARATE METHOD) ===")
+            print(f"🚀 [TERMINAL] handle_separate_launch() called")
+            print(f"🚀 [TERMINAL] Separate method - Project: {repr(project_name)}")
+            print(f"🚀 [TERMINAL] Separate method - Path: {repr(project_path)}")
+            print(f"🚀 [TERMINAL] Name type: {type(project_name)}, Path type: {type(project_path)}")
+            logger.info(f"🚀 LAUNCH BUTTON CLICKED (SEPARATE) - Name: {project_name}, Path: {project_path}")
             
             if not project_name or not project_path:
                 print(f"🚀 [TERMINAL] ERROR: Missing project name or path")
-                logger.error("Missing project name or path in separate launch")
+                logger.error("LAUNCH BUTTON: Missing project name or path in separate launch")
                 return "❌ Missing project name or path"
             
             try:
@@ -990,7 +1119,7 @@ def main():
             
             # Only refresh if needed and it's been at least 10 seconds
             if (launcher.ui_needs_refresh and (current_time - last_check_time > 10)) or (current_time - launcher.last_ui_update > 60):
-                grid_html = launcher.create_projects_grid(launcher.current_projects)
+                grid_html = launcher.create_projects_grid(launcher.current_projects, api_port)
                 stats = db.get_stats()
                 status_md = f"**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
                 launcher.ui_needs_refresh = False
@@ -1029,12 +1158,20 @@ def main():
     
     return app
 
-def find_available_port(start_port=7870, max_port=7880):
-    """Find an available port in the given range"""
+def find_available_port(start_port=7870, end_port=7890, exclude_ports=None):
+    """Find an available port in the specified range, excluding certain ports"""
     import socket
-    print(f"🚀 [TERMINAL] Searching for available port in range {start_port}-{max_port}")
     
-    for port in range(start_port, max_port + 1):
+    if exclude_ports is None:
+        exclude_ports = []
+    
+    print(f"🚀 [TERMINAL] Searching for available port in range {start_port}-{end_port}, excluding {exclude_ports}")
+    
+    for port in range(start_port, end_port + 1):
+        if port in exclude_ports:
+            print(f"🚀 [TERMINAL] Port {port} excluded, skipping...")
+            continue
+            
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', port))
@@ -1042,9 +1179,8 @@ def find_available_port(start_port=7870, max_port=7880):
                 return port
         except OSError:
             print(f"🚀 [TERMINAL] Port {port} is in use, trying next...")
-            continue
     
-    print(f"🚀 [TERMINAL] ERROR: No available ports found in range {start_port}-{max_port}")
+    print(f"🚀 [TERMINAL] No available ports found in range {start_port}-{end_port}")
     return None
 
 if __name__ == "__main__":
@@ -1055,31 +1191,41 @@ if __name__ == "__main__":
     logger.info("Starting Persistent AI Project Launcher...")
     
     try:
+        # Find port for API server first
+        print("🚀 [TERMINAL] Finding available port for Launch API Server...")
+        api_port = find_available_port(start_port=7871, end_port=7890)
+        if api_port is None:
+            print("❌ No available ports found for API server in range 7871-7890")
+            print("🚀 [TERMINAL] Please check if other services are using these ports")
+            print("🚀 [TERMINAL] You can check with: lsof -i :7871-7890")
+            exit(1)
+        
         print("🚀 [TERMINAL] Initializing application...")
-        app = main()
+        app = main(api_port=api_port)  # Pass API port to main
         print("🚀 [TERMINAL] Application initialized successfully")
         
-        # Find available port
-        print("🚀 [TERMINAL] Finding available port...")
-        port = find_available_port()
-        if port is None:
-            print("❌ No available ports found in range 7870-7880")
+        # Find available port for Gradio (excluding API server port)
+        print("🚀 [TERMINAL] Finding available port for Gradio...")
+        gradio_port = find_available_port(start_port=7870, end_port=7890, exclude_ports=[api_port])
+        if gradio_port is None:
+            print("❌ No available ports found for Gradio in range 7870-7890")
             print("🚀 [TERMINAL] Please check if other services are using these ports")
-            print("🚀 [TERMINAL] You can check with: lsof -i :7870-7880")
+            print("🚀 [TERMINAL] You can check with: lsof -i :7870-7890")
             exit(1)
         
         print("🚀 [TERMINAL] =================================")
         print("🚀 Persistent AI Project Launcher")
-        print(f"📱 Web interface: http://localhost:{port}")
+        print(f"📱 Web interface: http://localhost:{gradio_port}")
+        print(f"🌐 Launch API: http://localhost:{api_port}")
         print("💾 Using persistent database for project tracking")
         print("🔄 Background scanning enabled")
         print("⏰ Auto-refresh every 15 seconds")
         print("🔍 Real-time search and filtering")
         print("🚀 [TERMINAL] =================================")
-        print(f"🚀 [TERMINAL] Starting Gradio server on port {port}...")
+        print(f"🚀 [TERMINAL] Starting Gradio server on port {gradio_port}...")
         
-        logger.info(f"Starting Gradio server on port {port}")
-        app.launch(share=False, server_name="0.0.0.0", server_port=port)
+        logger.info(f"Starting Gradio server on port {gradio_port}")
+        app.launch(share=False, server_name="0.0.0.0", server_port=gradio_port)
         
     except KeyboardInterrupt:
         print("\n🚀 [TERMINAL] Launcher stopped by user")

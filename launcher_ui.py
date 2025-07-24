@@ -94,71 +94,72 @@ def build_launcher_ui(config: dict):
     """Build the launcher UI components"""
     launcher = LauncherUI(config)
     
-    with gr.Row():
-        scan_btn = gr.Button("🔍 Scan Projects", variant="primary")
-        status_text = gr.Textbox(label="Status", interactive=False)
-    
-    projects_gallery = gr.Gallery(
-        label="AI Projects",
-        show_label=True,
-        elem_id="projects_gallery",
-        columns=4,
-        rows=2,
-        object_fit="contain",
-        height="auto"
-    )
-    
-    with gr.Row():
-        project_info = gr.Markdown("Select a project to see details")
-    
-    launch_output = gr.Textbox(label="Launch Output", interactive=False)
-    
-    def scan_and_display():
-        try:
-            projects = launcher.scan_projects()
-            
-            # Prepare gallery items
-            gallery_items = []
-            for project in projects:
-                gallery_items.append((project['icon'], project['name']))
-            
-            return gallery_items, f"✅ Scanned {len(projects)} projects"
-        except Exception as e:
-            return [], f"❌ Error scanning: {str(e)}"
-    
-    def select_project(evt: gr.SelectData):
-        if evt.index < len(launcher.projects):
-            project = launcher.projects[evt.index]
-            env_info = launcher.env_detector.detect_environment(project['path'])
-            
-            info_md = f"""
+    with gr.Column():
+        with gr.Row():
+            scan_btn = gr.Button("🔍 Scan Projects", variant="primary")
+            status_text = gr.Textbox(label="Status", interactive=False)
+        
+        projects_gallery = gr.Gallery(
+            label="AI Projects",
+            show_label=True,
+            elem_id="projects_gallery",
+            columns=4,
+            rows=2,
+            object_fit="contain",
+            height="auto"
+        )
+        
+        with gr.Row():
+            project_info = gr.Markdown("Select a project to see details")
+        
+        launch_output = gr.Textbox(label="Launch Output", interactive=False)
+        
+        def scan_and_display():
+            try:
+                projects = launcher.scan_projects()
+                
+                # Prepare gallery items
+                gallery_items = []
+                for project in projects:
+                    gallery_items.append((project['icon'], project['name']))
+                
+                return gallery_items, f"✅ Scanned {len(projects)} projects"
+            except Exception as e:
+                return [], f"❌ Error scanning: {str(e)}"
+        
+        def select_project(evt: gr.SelectData):
+            if evt.index < len(launcher.projects):
+                project = launcher.projects[evt.index]
+                env_info = launcher.env_detector.detect_environment(project['path'])
+                
+                info_md = f"""
 ## {project['name']}
 **Path:** `{project['path']}`
 **Environment:** {env_info['type']} ({env_info.get('name', 'N/A')})
 **Description:** {project['description']}
-            """
-            return info_md
-        return "No project selected"
-    
-    def launch_selected(evt: gr.SelectData):
-        if evt.index < len(launcher.projects):
-            project = launcher.projects[evt.index]
-            result = launcher.launch_project(project['path'])
-            return result
-        return "No project selected"
-    
-    # Event handlers
-    scan_btn.click(
-        scan_and_display,
-        outputs=[projects_gallery, status_text]
-    )
-    
-    projects_gallery.select(
-        select_project,
-        outputs=[project_info]
-    )
-    
-    projects_gallery.select(
-        launch_selected,
-        outputs=[launch_output]
-    ) 
+                """
+                return info_md
+            return "No project selected"
+        
+        def launch_selected(evt: gr.SelectData):
+            if evt.index < len(launcher.projects):
+                project = launcher.projects[evt.index]
+                result = launcher.launch_project(project['path'])
+                return result
+            return "No project selected"
+        
+        # Event handlers
+        scan_btn.click(
+            scan_and_display,
+            outputs=[projects_gallery, status_text]
+        )
+        
+        projects_gallery.select(
+            select_project,
+            outputs=[project_info]
+        )
+        
+        projects_gallery.select(
+            launch_selected,
+            outputs=[launch_output]
+        ) 

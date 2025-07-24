@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from project_scanner import ProjectScanner
 from environment_detector import EnvironmentDetector
 from ollama_summarizer import OllamaSummarizer
+from qwen_launch_analyzer import QwenLaunchAnalyzer
 from icon_generator import generate_project_icon
 from project_database import db
 from logger import logger
@@ -21,17 +22,20 @@ class BackgroundScanner:
         self.scanner = ProjectScanner(config['index_directories'])
         self.env_detector = EnvironmentDetector()
         self.summarizer = OllamaSummarizer()
+        self.launch_analyzer = QwenLaunchAnalyzer()
         
         self.is_running = False
         self.scan_thread = None
         self.update_queue = Queue()
         
         # Scan intervals (in seconds)
-        self.full_scan_interval = 3600  # 1 hour
-        self.quick_scan_interval = 300   # 5 minutes
+        self.full_scan_interval = 3600  # 1 hour - for comprehensive directory scanning
+        self.quick_scan_interval = 180   # 3 minutes - for new project discovery
+        self.ai_analysis_interval = 86400  # 24 hours - for AI launch command regeneration
         
         self.last_full_scan = 0
         self.last_quick_scan = 0
+        self.last_ai_analysis = 0
         
     def start(self):
         """Start the background scanner"""
@@ -89,6 +93,11 @@ class BackgroundScanner:
                     self._perform_scan(scan_type='quick')
                     self.last_quick_scan = current_time
                 
+                # Check for AI analysis (daily)
+                if current_time - self.last_ai_analysis > self.ai_analysis_interval:
+                    self._perform_scan(scan_type='ai_analysis')
+                    self.last_ai_analysis = current_time
+                
                 # Sleep for a bit
                 time.sleep(10)
                 
@@ -108,6 +117,9 @@ class BackgroundScanner:
             if scan_type == 'quick':
                 # Quick scan: only check for new directories and verify existing ones
                 projects_found, projects_updated = self._quick_scan()
+            elif scan_type == 'ai_analysis':
+                # AI analysis: regenerate launch commands for projects that need it
+                projects_found, projects_updated = self._perform_ai_analysis()
             else:
                 # Full scan: complete directory traversal
                 projects_found, projects_updated = self._full_scan()
@@ -251,6 +263,8 @@ class BackgroundScanner:
             try:
                 path = project_data['path']
                 name = project_data['name']
+                env_type = project_data.get('environment_type', 'none')
+                env_name = project_data.get('environment_name', '')
                 
                 # Generate AI summaries
                 doc_summary = self.summarizer.summarize_documentation(path)
@@ -259,17 +273,31 @@ class BackgroundScanner:
                     name, doc_summary, code_summary
                 )
                 
-                # Update database
+                # Generate AI launch command using Qwen3
+                launch_analysis = self.launch_analyzer.generate_launch_command(
+                    path, name, env_type, env_name
+                )
+                
+                # Update database with AI analysis results
                 update_data = {
                     'path': path,
                     'description': description,
                     'tooltip': tooltip,
+                    'launch_command': launch_analysis.get('launch_command', ''),
+                    'launch_type': launch_analysis.get('launch_type', 'unknown'),
+                    'launch_working_directory': launch_analysis.get('working_directory', '.'),
+                    'launch_args': launch_analysis.get('requires_args', ''),
+                    'launch_confidence': launch_analysis.get('confidence', 0.0),
+                    'launch_notes': launch_analysis.get('notes', ''),
+                    'launch_analysis_method': launch_analysis.get('analysis_method', 'unknown'),
+                    'launch_analyzed_at': launch_analysis.get('analyzed_at', time.time()),
+                    'main_script': launch_analysis.get('main_script', ''),
                     'dirty_flag': 0,
                     'last_scanned': time.time()
                 }
                 
                 db.upsert_project(update_data)
-                logger.info(f"Processed dirty project: {name}")
+                logger.info(f"Processed dirty project: {name} - Launch: {launch_analysis.get('launch_command', 'unknown')}")
                 
                 # Notify UI
                 if self.update_callback:
@@ -283,6 +311,108 @@ class BackgroundScanner:
             executor.map(process_single_project, dirty_projects)
         
         logger.info(f"Completed processing {len(dirty_projects)} dirty projects")
+    
+    def _perform_ai_analysis(self):
+        """Perform AI analysis on projects that need it (daily)"""
+        logger.info("Starting daily AI analysis scan...")
+        
+        # Get projects that need AI analysis (no launch command or analysis older than 24 hours)
+        all_projects = db.get_all_projects(active_only=True)
+        projects_needing_analysis = []
+        
+        current_time = time.time()
+        one_day_ago = current_time - 86400  # 24 hours in seconds
+        
+        for project in all_projects:
+            needs_analysis = False
+            
+            # Check if project has no launch command
+            if not project.get('launch_command'):
+                needs_analysis = True
+                logger.debug(f"Project {project['name']} needs analysis: no launch command")
+            
+            # Check if launch analysis is older than 24 hours
+            elif project.get('launch_analyzed_at'):
+                try:
+                    analyzed_at = float(project['launch_analyzed_at'])
+                    if analyzed_at < one_day_ago:
+                        needs_analysis = True
+                        logger.debug(f"Project {project['name']} needs analysis: last analyzed {(current_time - analyzed_at) / 3600:.1f} hours ago")
+                except (ValueError, TypeError):
+                    needs_analysis = True
+                    logger.debug(f"Project {project['name']} needs analysis: invalid analysis timestamp")
+            else:
+                needs_analysis = True
+                logger.debug(f"Project {project['name']} needs analysis: no analysis timestamp")
+            
+            if needs_analysis:
+                projects_needing_analysis.append(project)
+        
+        if not projects_needing_analysis:
+            logger.info("No projects need AI analysis - all are up to date")
+            return
+        
+        logger.info(f"Found {len(projects_needing_analysis)} projects needing AI analysis")
+        
+        def process_single_project(project_data):
+            try:
+                path = project_data['path']
+                name = project_data['name']
+                env_type = project_data.get('environment_type', 'none')
+                env_name = project_data.get('environment_name', '')
+                
+                logger.info(f"Starting AI analysis for: {name}")
+                
+                # Generate AI summaries (if needed)
+                description = project_data.get('description', '')
+                tooltip = project_data.get('tooltip', '')
+                
+                if not description or not tooltip:
+                    doc_summary = self.summarizer.summarize_documentation(path)
+                    code_summary = self.summarizer.summarize_code(path)
+                    tooltip, description = self.summarizer.generate_final_summary(
+                        name, doc_summary, code_summary
+                    )
+                
+                # Generate AI launch command using Qwen3
+                launch_analysis = self.launch_analyzer.generate_launch_command(
+                    path, name, env_type, env_name
+                )
+                
+                # Update database with AI analysis results
+                update_data = {
+                    'path': path,
+                    'description': description,
+                    'tooltip': tooltip,
+                    'launch_command': launch_analysis.get('launch_command', ''),
+                    'launch_type': launch_analysis.get('launch_type', 'unknown'),
+                    'launch_working_directory': launch_analysis.get('working_directory', '.'),
+                    'launch_args': launch_analysis.get('requires_args', ''),
+                    'launch_confidence': launch_analysis.get('confidence', 0.0),
+                    'launch_notes': launch_analysis.get('notes', ''),
+                    'launch_analysis_method': launch_analysis.get('analysis_method', 'unknown'),
+                    'launch_analyzed_at': launch_analysis.get('analyzed_at', time.time()),
+                    'main_script': launch_analysis.get('main_script', ''),
+                    'dirty_flag': 0,
+                    'last_scanned': time.time()
+                }
+                
+                db.upsert_project(update_data)
+                logger.info(f"Completed AI analysis for: {name} - Launch: {launch_analysis.get('launch_command', 'unknown')}")
+                
+                # Notify UI
+                if self.update_callback:
+                    self.update_callback('project_updated', update_data)
+                    
+            except Exception as e:
+                logger.error(f"Error in AI analysis for {project_data.get('name', 'Unknown')}: {e}")
+        
+        # Process projects in parallel (limited concurrency for Ollama)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            executor.map(process_single_project, projects_needing_analysis)
+        
+        logger.info(f"Completed daily AI analysis: {len(projects_needing_analysis)} projects processed")
+        return len(projects_needing_analysis), len(projects_needing_analysis)
     
     def _prepare_project_data(self, project: Dict, existing: Optional[Dict] = None) -> Dict:
         """Prepare project data for database storage"""
@@ -314,17 +444,39 @@ class BackgroundScanner:
             'size_mb': self._parse_size_to_mb(project.get('size', '0')),
             'is_git': project.get('is_git', False),
             'status': 'active',
-            'dirty_flag': 1,  # Mark as dirty for AI processing
+            'dirty_flag': 0,  # Only mark as dirty if it truly needs AI re-analysis
             'last_modified': time.time()
         }
         
-        # If existing project, preserve some fields
+        # If existing project, preserve AI analysis unless it's really old
         if existing:
-            # Keep existing descriptions if not dirty
-            if not existing.get('dirty_flag', True):
+            # Keep existing AI analysis if it's less than 24 hours old
+            current_time = time.time()
+            analyzed_at = existing.get('launch_analyzed_at', 0)
+            
+            try:
+                analyzed_at = float(analyzed_at) if analyzed_at else 0
+            except (ValueError, TypeError):
+                analyzed_at = 0
+            
+            # If analysis is less than 24 hours old, preserve it
+            if analyzed_at > 0 and (current_time - analyzed_at) < 86400:
                 project_data['description'] = existing.get('description', '')
                 project_data['tooltip'] = existing.get('tooltip', '')
+                project_data['launch_command'] = existing.get('launch_command', '')
+                project_data['launch_type'] = existing.get('launch_type', '')
+                project_data['launch_working_directory'] = existing.get('launch_working_directory', '.')
+                project_data['launch_args'] = existing.get('launch_args', '')
+                project_data['launch_confidence'] = existing.get('launch_confidence', 0.0)
+                project_data['launch_notes'] = existing.get('launch_notes', '')
+                project_data['launch_analysis_method'] = existing.get('launch_analysis_method', '')
+                project_data['launch_analyzed_at'] = existing.get('launch_analyzed_at', '')
+                project_data['main_script'] = existing.get('main_script', '')
                 project_data['dirty_flag'] = 0
+                logger.debug(f"Preserved recent AI analysis for {project['name']} (analyzed {(current_time - analyzed_at) / 3600:.1f} hours ago)")
+            else:
+                # Analysis is old or missing, will be picked up by daily AI scan
+                logger.debug(f"AI analysis for {project['name']} needs refresh (last: {(current_time - analyzed_at) / 3600:.1f} hours ago)")
         
         return project_data
     
