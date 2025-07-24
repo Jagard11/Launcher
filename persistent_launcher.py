@@ -48,6 +48,56 @@ class PersistentLauncher:
             logger.error(f"Error loading projects from database: {e}")
             self.current_projects = []
     
+    def filter_projects(self, search_query: str) -> List[Dict]:
+        """Filter projects based on search query with fuzzy matching"""
+        if not search_query or not search_query.strip():
+            return self.current_projects
+        
+        search_terms = search_query.lower().strip().split()
+        filtered_projects = []
+        
+        for project in self.current_projects:
+            # Create searchable text from project data - ensure all fields are strings
+            searchable_fields = [
+                str(project.get('name', '') or ''),
+                str(project.get('display_name', '') or ''),
+                str(project.get('description', '') or ''),
+                str(project.get('tooltip', '') or ''),
+                str(project.get('path', '') or '').replace('/', ' ').replace('\\', ' '),  # Make paths searchable
+                str(project.get('environment_type', '') or ''),
+                str(project.get('main_script', '') or ''),
+            ]
+            
+            # Filter out any remaining None or empty values
+            searchable_fields = [field for field in searchable_fields if field and field != 'None']
+            searchable_text = " ".join(searchable_fields).lower()
+            
+            # Calculate match score
+            match_score = 0
+            max_possible_score = len(search_terms)
+            
+            for term in search_terms:
+                if term in searchable_text:
+                    match_score += 1
+                    # Boost score for exact name matches
+                    if term in project.get('name', '').lower():
+                        match_score += 0.5
+                    # Boost score for environment type matches
+                    if term == project.get('environment_type', '').lower():
+                        match_score += 0.3
+            
+            # Include project if it matches all terms or has a high partial match
+            if match_score >= max_possible_score or (match_score / max_possible_score) >= 0.7:
+                # Add match score for potential sorting
+                project_copy = project.copy()
+                project_copy['_match_score'] = match_score
+                filtered_projects.append(project_copy)
+        
+        # Sort by match score (highest first)
+        filtered_projects.sort(key=lambda x: x.get('_match_score', 0), reverse=True)
+        
+        return filtered_projects
+    
     def on_scanner_update(self, event_type: str, data: Dict):
         """Handle updates from background scanner"""
         try:
@@ -109,10 +159,13 @@ class PersistentLauncher:
         if project.get('is_git', False):
             status_badges.append('<span style="background: #339af0; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">GIT</span>')
         
-        # Description handling
-        description = project.get('description', project.get('tooltip', 'AI/ML Project'))
-        if not description or description == 'No description available':
-            description = project.get('tooltip', f"AI project: {project['name']}")
+        # Description handling - ensure we have a valid string
+        description = project.get('description') or project.get('tooltip') or 'AI/ML Project'
+        if not description or description == 'No description available' or description == 'None':
+            description = project.get('tooltip') or f"AI project: {project.get('name', 'Unknown')}"
+        
+        # Ensure description is a string
+        description = str(description or 'AI/ML Project')
         
         # Create unique IDs for this card
         card_id = f"card_{index}"
@@ -121,8 +174,8 @@ class PersistentLauncher:
         launch_id = f"launch_{index}"
         
         # Escape project path for JavaScript - avoid backslashes in f-strings
-        project_path_safe = project['path'].replace('\\', '/').replace("'", "&apos;")
-        project_name_safe = project['name'].replace("'", "&apos;")
+        project_path_safe = str(project.get('path', '')).replace('\\', '/').replace("'", "&apos;")
+        project_name_safe = str(project.get('name', 'Unknown')).replace("'", "&apos;")
         
         return f"""
         <div class="project-card" id="{card_id}" style="
@@ -145,7 +198,7 @@ class PersistentLauncher:
                 <div style="flex: 1; min-width: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                         <h3 style="margin: 0; font-size: 16px; color: #2c3e50; font-weight: 600; flex: 1;">
-                            {project['name']}
+                            {str(project.get('name', 'Unknown Project'))}
                         </h3>
                         <button id="{launch_id}" onclick="launchProject('{project_name_safe}', '{project_path_safe}')" style="
                             background: linear-gradient(135deg, #007bff, #0056b3);
@@ -168,7 +221,7 @@ class PersistentLauncher:
                         {' '.join(status_badges)}
                     </div>
                     <div id="{desc_id}" style="
-                        font-size: 12px; color: #6c757d; margin: 0 0 8px 0; 
+                        font-size: 12px; color: #2c3e50 !important; margin: 0 0 8px 0; 
                         line-height: 1.4;
                     ">
                         <div id="{desc_id}_text" style="
@@ -177,6 +230,7 @@ class PersistentLauncher:
                             -webkit-line-clamp: 3;
                             -webkit-box-orient: vertical;
                             line-height: 1.4;
+                            color: #2c3e50 !important;
                         ">
                             {description}
                         </div>
@@ -189,7 +243,7 @@ class PersistentLauncher:
                             text-decoration: underline; 
                             padding: 0; 
                             margin-top: 4px;
-                            display: {'block' if len(description) > 150 else 'none'};
+                            display: {'block' if len(description) > 200 else 'none'};
                         ">Show more</button>
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #868e96;">
@@ -235,16 +289,29 @@ class PersistentLauncher:
             window.launchCounter++;
             const launchId = window.launchCounter;
             
-            console.log(`[${launchId}] Launching: ${projectName}`);
+            // Log launch attempt to browser console
+            console.log(`🚀 [LAUNCH] Button clicked for: ${projectName}`);
+            console.log(`🚀 [LAUNCH] Project path: ${projectPath}`);
+            console.log(`🚀 [LAUNCH] Launch ID: ${launchId}`);
+            console.log(`🚀 [LAUNCH] Timestamp: ${new Date().toISOString()}`);
             
-            // Show immediate feedback
-            const outputElement = document.getElementById('launch_output');
+            // Log button click (backend logging will happen when event is processed)
+            
+            // Show immediate feedback in output
+            const outputElement = document.querySelector('[id*="launch_output"] textarea') || 
+                                  document.querySelector('#launch_output textarea') ||
+                                  document.querySelector('textarea[placeholder*="Launch Output"]');
+            console.log(`🚀 [LAUNCH] Output element found:`, !!outputElement);
             if (outputElement) {
                 outputElement.value = `🚀 Launching ${projectName}...`;
+                outputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                console.log(`🚀 [LAUNCH] Updated output display`);
             }
             
-            // Trigger instant launch via hidden input
-            const launchInput = document.getElementById('instant_launch_data');
+            // Method 1: Try hidden input approach
+            const launchInput = document.querySelector('[id*="instant_launch_data"]') || 
+                               document.querySelector('#instant_launch_data');
+            console.log(`🚀 [LAUNCH] Method 1 - Hidden input found:`, !!launchInput);
             if (launchInput) {
                 const launchData = JSON.stringify({
                     project_name: projectName.replace(/&apos;/g, "'"),
@@ -252,28 +319,95 @@ class PersistentLauncher:
                     launch_id: launchId
                 });
                 
+                console.log(`🚀 [LAUNCH] Method 1 - Setting data:`, launchData);
                 launchInput.value = launchData;
                 launchInput.dispatchEvent(new Event('input', { bubbles: true }));
+                console.log(`🚀 [LAUNCH] Method 1 - Event dispatched`);
+                return false;
             }
             
-            return false; // Prevent any default behavior
-        }
+            // Method 2: Try alternative approach with separate inputs
+            const nameInput = document.querySelector('[id*="project_name_data"]') || 
+                             document.querySelector('#project_name_data');
+            const pathInput = document.querySelector('[id*="project_path_data"]') || 
+                             document.querySelector('#project_path_data');
+            const triggerBtn = document.querySelector('[id*="launch_trigger"]') || 
+                              document.querySelector('#launch_trigger');
+            
+            console.log(`🚀 [LAUNCH] Method 2 - Elements found:`, {
+                name: !!nameInput, 
+                path: !!pathInput, 
+                trigger: !!triggerBtn
+            });
+            
+            if (nameInput && pathInput && triggerBtn) {
+                nameInput.value = projectName.replace(/&apos;/g, "'");
+                pathInput.value = projectPath.replace(/&apos;/g, "'");
+                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                pathInput.dispatchEvent(new Event('input', { bubbles: true }));
+                console.log(`🚀 [LAUNCH] Method 2 - Values set, triggering button click`);
+                setTimeout(() => {
+                    triggerBtn.click();
+                    console.log(`🚀 [LAUNCH] Method 2 - Button clicked`);
+                }, 100);
+                return false;
+            }
+            
+            console.error(`🚀 [LAUNCH] ERROR: No valid launch method found!`);
+            console.log(`🚀 [LAUNCH] Available elements:`, {
+                hiddenInput: !!launchInput,
+                nameInput: !!nameInput,
+                pathInput: !!pathInput,
+                triggerBtn: !!triggerBtn,
+                outputElement: !!outputElement
+            });
+            
+            return false;
+                }
         
         function toggleDesc(descId) {
+            console.log('🔄 [TOGGLE] toggleDesc called with descId:', descId);
+            
             const textDiv = document.getElementById(descId + '_text');
             const btnId = descId.replace('desc_', 'btn_');
             const button = document.getElementById(btnId);
             
+            console.log('🔄 [TOGGLE] Elements found:', {
+                textDiv: !!textDiv,
+                button: !!button,
+                textDivId: descId + '_text',
+                buttonId: btnId
+            });
+            
             if (textDiv && button) {
-                if (textDiv.style.webkitLineClamp === 'none') {
-                    // Show truncated
+                const currentClamp = textDiv.style.webkitLineClamp || window.getComputedStyle(textDiv).webkitLineClamp;
+                const isExpanded = currentClamp === 'none' || currentClamp === '';
+                
+                console.log('🔄 [TOGGLE] Current state:', {
+                    currentClamp: currentClamp,
+                    isExpanded: isExpanded,
+                    currentButtonText: button.textContent
+                });
+                
+                if (isExpanded) {
+                    // Currently expanded, collapse it
+                    textDiv.style.overflow = 'hidden';
+                    textDiv.style.display = '-webkit-box';
                     textDiv.style.webkitLineClamp = '3';
+                    textDiv.style.webkitBoxOrient = 'vertical';
                     button.textContent = 'Show more';
+                    console.log('🔄 [TOGGLE] Collapsed description');
                 } else {
-                    // Show full
+                    // Currently collapsed, expand it
+                    textDiv.style.overflow = 'visible';
+                    textDiv.style.display = 'block';
                     textDiv.style.webkitLineClamp = 'none';
+                    textDiv.style.webkitBoxOrient = 'unset';
                     button.textContent = 'Show less';
+                    console.log('🔄 [TOGGLE] Expanded description');
                 }
+            } else {
+                console.error('🔄 [TOGGLE] ERROR: Could not find required elements');
             }
         }
         </script>
@@ -283,79 +417,140 @@ class PersistentLauncher:
     
     def launch_project(self, project_path: str, project_name: str) -> str:
         """Launch a project with its detected environment"""
+        print(f"🚀 [TERMINAL] ===== LAUNCH PROJECT =====")
+        print(f"🚀 [TERMINAL] Project: {project_name}")
+        print(f"🚀 [TERMINAL] Path: {project_path}")
+        
         try:
+            print(f"🚀 [TERMINAL] Step 1: Detecting environment...")
             env_detector = EnvironmentDetector()
             env_info = env_detector.detect_environment(project_path)
             
+            print(f"🚀 [TERMINAL] Environment detected: {env_info}")
             logger.launch_attempt(project_name, project_path, env_info['type'])
             
             if env_info['type'] == 'none':
                 error_msg = f"No Python environment detected for {project_name}"
+                print(f"🚀 [TERMINAL] ERROR: {error_msg}")
                 logger.launch_error(project_name, error_msg)
                 return f"❌ {error_msg}"
             
+            print(f"🚀 [TERMINAL] Step 2: Finding main script...")
             # Find main script
             main_scripts = ['app.py', 'main.py', 'run.py', 'start.py', 'launch.py', 'webui.py']
             script_path = None
             
+            print(f"🚀 [TERMINAL] Checking for scripts: {main_scripts}")
             for script in main_scripts:
                 potential_path = Path(project_path) / script
+                print(f"🚀 [TERMINAL]   Checking: {potential_path}")
                 if potential_path.exists():
                     script_path = potential_path
+                    print(f"🚀 [TERMINAL]   FOUND: {script_path}")
                     break
             
             if not script_path:
+                print(f"🚀 [TERMINAL] No standard scripts found, looking for any .py files...")
                 # Try to find any Python file that might be the main one
                 py_files = list(Path(project_path).glob('*.py'))
+                print(f"🚀 [TERMINAL] Found .py files: {py_files}")
                 if py_files:
                     script_path = py_files[0]
+                    print(f"🚀 [TERMINAL] Using fallback script: {script_path}")
                 else:
                     error_msg = f"No Python script found in {project_name}"
+                    print(f"🚀 [TERMINAL] ERROR: {error_msg}")
                     logger.launch_error(project_name, error_msg)
                     return f"❌ {error_msg}"
             
+            print(f"🚀 [TERMINAL] Step 3: Building launch command...")
             # Launch command
             script_name = script_path.name
             project_path_quoted = f'"{project_path}"'
             
+            print(f"🚀 [TERMINAL] Script to run: {script_name}")
+            print(f"🚀 [TERMINAL] Environment type: {env_info['type']}")
+            
             if env_info['type'] == 'conda':
                 env_name = env_info.get('name', 'base')
                 cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && conda activate {env_name} && python3 {script_name}; exec bash"'
+                print(f"🚀 [TERMINAL] Conda environment: {env_name}")
             elif env_info['type'] == 'venv':
                 activate_path = env_info.get('activate_path', '')
                 activate_path_quoted = f'"{activate_path}"'
                 cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && source {activate_path_quoted} && python3 {script_name}; exec bash"'
+                print(f"🚀 [TERMINAL] Virtual env activation: {activate_path}")
             elif env_info['type'] == 'poetry':
                 cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && poetry run python3 {script_name}; exec bash"'
+                print(f"🚀 [TERMINAL] Using Poetry environment")
             elif env_info['type'] == 'pipenv':
                 cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && pipenv run python3 {script_name}; exec bash"'
+                print(f"🚀 [TERMINAL] Using Pipenv environment")
             else:
                 cmd = f'gnome-terminal --title="{project_name}" -- bash -c "cd {project_path_quoted} && python3 {script_name}; exec bash"'
+                print(f"🚀 [TERMINAL] Using system Python")
             
-            subprocess.Popen(cmd, shell=True)
-            logger.launch_success(project_name)
-            return f"✅ Launched {project_name} (Environment: {env_info['type']})"
+            print(f"🚀 [TERMINAL] Step 4: Executing command...")
+            print(f"🚀 [TERMINAL] Command: {cmd}")
+            
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"🚀 [TERMINAL] Process started with PID: {process.pid}")
+            
+            # Give it a moment to start
+            import time
+            time.sleep(0.5)
+            
+            # Check if process started successfully
+            if process.poll() is None:
+                print(f"🚀 [TERMINAL] SUCCESS: Process is running")
+                logger.launch_success(project_name)
+                return f"✅ Launched {project_name} (Environment: {env_info['type']})"
+            else:
+                stdout, stderr = process.communicate()
+                error_details = stderr.decode() if stderr else "Unknown error"
+                print(f"🚀 [TERMINAL] ERROR: Process failed to start")
+                print(f"🚀 [TERMINAL] Return code: {process.returncode}")
+                print(f"🚀 [TERMINAL] Stderr: {error_details}")
+                logger.launch_error(project_name, f"Process failed: {error_details}")
+                return f"❌ Failed to start {project_name}: {error_details}"
             
         except Exception as e:
             error_msg = str(e)
+            print(f"🚀 [TERMINAL] EXCEPTION: {error_msg}")
+            import traceback
+            print(f"🚀 [TERMINAL] Traceback: {traceback.format_exc()}")
             logger.launch_error(project_name, error_msg)
             return f"❌ Error launching project: {error_msg}"
 
     def launch_project_background(self, project_path: str, project_name: str, launch_id: int = 0) -> str:
         """Launch a project in the background without blocking the UI"""
+        print(f"🚀 [TERMINAL] launch_project_background() called")
+        print(f"🚀 [TERMINAL]   Project: {project_name}")
+        print(f"🚀 [TERMINAL]   Path: {project_path}")
+        print(f"🚀 [TERMINAL]   Launch ID: {launch_id}")
+        logger.info(f"🚀 launch_project_background called - Name: {project_name}, Path: {project_path}, ID: {launch_id}")
+        
         def run_launch():
             try:
+                print(f"🚀 [TERMINAL] Background thread started for {project_name}")
+                logger.info(f"[{launch_id}] Background thread started for {project_name}")
+                
                 result = self.launch_project(project_path, project_name)
+                
+                print(f"🚀 [TERMINAL] Background launch completed: {result}")
                 logger.info(f"[{launch_id}] Background launch completed: {project_name}")
                 return result
             except Exception as e:
                 error_msg = f"❌ Error launching {project_name}: {str(e)}"
+                print(f"🚀 [TERMINAL] Background launch FAILED: {error_msg}")
                 logger.error(f"[{launch_id}] Background launch failed: {error_msg}")
                 return error_msg
         
+        print(f"🚀 [TERMINAL] Starting background thread...")
         # Start the launch in a background thread
         thread = threading.Thread(target=run_launch, daemon=True)
         thread.start()
+        print(f"🚀 [TERMINAL] Background thread started successfully")
         
         return f"✅ {project_name} is starting... (Background launch #{launch_id})"
 
@@ -376,6 +571,171 @@ def main():
     stats = db.get_stats()
     
     with gr.Blocks(title="🚀 Persistent AI Launcher", theme=gr.themes.Soft()) as app:
+        # Add custom CSS for sticky search bar
+        gr.HTML("""
+        <style>
+        .search-container {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 1000 !important;
+            background: linear-gradient(135deg, #ffffff, #f8f9fa) !important;
+            padding: 15px 20px !important;
+            border-bottom: 2px solid #e0e0e0 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
+            margin: -20px -20px 20px -20px !important;
+            backdrop-filter: blur(10px) !important;
+        }
+        .search-input {
+            width: 100% !important;
+            max-width: 800px !important;
+            margin: 0 auto !important;
+            padding: 14px 20px 14px 50px !important;
+            border: 2px solid #007bff !important;
+            border-radius: 30px !important;
+            font-size: 16px !important;
+            outline: none !important;
+            transition: all 0.3s ease !important;
+            background: white !important;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="%23007bff" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>') !important;
+            background-repeat: no-repeat !important;
+            background-position: 18px center !important;
+            background-size: 16px !important;
+        }
+        .search-input:focus {
+            border-color: #0056b3 !important;
+            box-shadow: 0 0 15px rgba(0,123,255,0.4) !important;
+            transform: translateY(-1px) !important;
+        }
+        .search-label {
+            margin-bottom: 10px !important;
+            font-weight: 600 !important;
+            color: #2c3e50 !important;
+            text-align: center !important;
+            font-size: 18px !important;
+        }
+        .search-container .gradio-textbox {
+            border: none !important;
+            box-shadow: none !important;
+        }
+        .search-container .gradio-textbox input {
+            border: 2px solid #007bff !important;
+            border-radius: 30px !important;
+        }
+        #clear_search {
+            background: #dc3545 !important;
+            border: 2px solid #dc3545 !important;
+            border-radius: 50% !important;
+            width: 40px !important;
+            height: 40px !important;
+            padding: 0 !important;
+            margin-left: 10px !important;
+            color: white !important;
+            font-size: 14px !important;
+            transition: all 0.3s ease !important;
+            cursor: pointer !important;
+        }
+        #clear_search:hover {
+            background: #c82333 !important;
+            border-color: #c82333 !important;
+            transform: scale(1.1) !important;
+        }
+        @media (max-width: 768px) {
+            .search-container {
+                padding: 12px 15px !important;
+                margin: -15px -15px 15px -15px !important;
+            }
+            .search-input {
+                padding: 12px 16px 12px 45px !important;
+                font-size: 14px !important;
+            }
+            .search-label {
+                font-size: 16px !important;
+            }
+            #clear_search {
+                width: 35px !important;
+                height: 35px !important;
+                font-size: 12px !important;
+                margin-left: 8px !important;
+            }
+        }
+        
+        /* Force readable text colors in project cards */
+        .project-card,
+        .project-card *,
+        .project-card div,
+        .project-card p,
+        .project-card span {
+            color: #2c3e50 !important;
+        }
+        
+        /* Specific overrides for project descriptions */
+        .project-card div[id*="desc_"] {
+            color: #2c3e50 !important;
+        }
+        
+        .project-card div[id*="desc_"] * {
+            color: #2c3e50 !important;
+        }
+        
+        /* Override any Gradio theme text colors in project cards */
+        .project-card [style*="color"] {
+            color: #2c3e50 !important;
+        }
+        
+        /* Force dark text on light backgrounds globally for project area */
+        div[style*="background: linear-gradient(145deg, #ffffff, #f8f9fa)"] *,
+        div[style*="background: linear-gradient(145deg, #ffffff, #f8f9fa)"] div,
+        div[style*="background: linear-gradient(145deg, #ffffff, #f8f9fa)"] p,
+        div[style*="background: linear-gradient(145deg, #ffffff, #f8f9fa)"] span {
+            color: #2c3e50 !important;
+        }
+        </style>
+        """)
+        
+        # Sticky search bar with keyboard shortcuts
+        gr.HTML("""
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                // Ctrl+F or Cmd+F to focus search
+                if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                    e.preventDefault();
+                    const searchInput = document.querySelector('#project_search input');
+                    if (searchInput) {
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                }
+                // Escape to clear search
+                if (e.key === 'Escape') {
+                    const searchInput = document.querySelector('#project_search input');
+                    if (searchInput && searchInput === document.activeElement) {
+                        const clearBtn = document.querySelector('#clear_search');
+                        if (clearBtn) clearBtn.click();
+                    }
+                }
+            });
+        });
+        </script>
+        """)
+        
+        # Sticky search bar
+        with gr.Row(elem_classes="search-container"):
+            with gr.Column():
+                gr.HTML('<div class="search-label">🔍 Search Projects <span style="font-size: 12px; color: #6c757d;">(Ctrl+F to focus, Esc to clear)</span></div>')
+                with gr.Row():
+                    with gr.Column(scale=9):
+                        search_input = gr.Textbox(
+                            placeholder="Type to search projects by name, description, path, or environment...",
+                            elem_classes="search-input",
+                            elem_id="project_search",
+                            show_label=False,
+                            container=False
+                        )
+                    with gr.Column(scale=1, min_width=60):
+                        clear_search_btn = gr.Button("✖️", size="sm", elem_id="clear_search")
+        
         gr.Markdown("# 🚀 Persistent AI Project Launcher")
         gr.Markdown("Automatically discovers, tracks, and launches your AI projects with persistent caching and background scanning.")
         
@@ -400,9 +760,12 @@ def main():
             launch_output = gr.Textbox(label="Launch Output", interactive=False, elem_id="launch_output")
             project_details = gr.Markdown("Click on a project name to see details")
         
-        # Single hidden input for instant launches
+        # Hidden components for instant launches
         with gr.Row(visible=False):
             instant_launch_input = gr.Textbox(elem_id="instant_launch_data")
+            project_name_input = gr.Textbox(elem_id="project_name_data")
+            project_path_input = gr.Textbox(elem_id="project_path_data")
+            launch_trigger = gr.Button("Launch", elem_id="launch_trigger")
         
         # Advanced controls
         with gr.Accordion("🛠️ Advanced Controls", open=False):
@@ -430,9 +793,59 @@ def main():
             launcher.scanner.trigger_dirty_cleanup()
             return "Processing dirty projects..."
         
+        def search_projects(search_query):
+            """Filter and display projects based on search query"""
+            try:
+                print(f"🚀 [TERMINAL] Search triggered with query: '{search_query}'")
+                
+                filtered_projects = launcher.filter_projects(search_query)
+                grid_html = launcher.create_projects_grid(filtered_projects)
+                
+                # Update status to show filtered count
+                total_projects = len(launcher.current_projects)
+                filtered_count = len(filtered_projects)
+                
+                print(f"🚀 [TERMINAL] Search results: {filtered_count} of {total_projects} projects")
+                
+                if search_query and search_query.strip():
+                    if filtered_count == 0:
+                        search_status = f"🔍 **No Results:** No projects match '{search_query}' • Total: {total_projects} projects"
+                    elif filtered_count == total_projects:
+                        search_status = f"🔍 **All Projects:** Showing all {total_projects} projects"
+                    else:
+                        search_status = f"🔍 **Search Results:** {filtered_count} of {total_projects} projects match '{search_query}'"
+                else:
+                    stats = db.get_stats()
+                    search_status = f"**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
+                
+                return grid_html, search_status
+                
+            except Exception as e:
+                print(f"🚀 [TERMINAL] Search error: {str(e)}")
+                import traceback
+                print(f"🚀 [TERMINAL] Search traceback: {traceback.format_exc()}")
+                
+                # Return error message and current projects
+                error_msg = f"🔍 **Search Error:** {str(e)} • Showing all projects"
+                grid_html = launcher.create_projects_grid(launcher.current_projects)
+                return grid_html, error_msg
+        
+        def clear_search():
+            """Clear the search and show all projects"""
+            grid_html = launcher.create_projects_grid(launcher.current_projects)
+            stats = db.get_stats()
+            status_md = f"**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
+            return "", grid_html, status_md
+        
         def handle_instant_launch(launch_data_json):
             """Handle instant project launches from the UI"""
+            print(f"\n🚀 [TERMINAL] handle_instant_launch() called")
+            print(f"🚀 [TERMINAL] Raw data received: {repr(launch_data_json)}")
+            logger.info(f"🚀 handle_instant_launch called with data: {launch_data_json}")
+            
             if not launch_data_json:
+                print(f"🚀 [TERMINAL] ERROR: No launch data provided")
+                logger.warning("No launch data provided")
                 return "No launch data"
                 
             try:
@@ -442,16 +855,28 @@ def main():
                 project_path = launch_data.get('project_path', '')
                 launch_id = launch_data.get('launch_id', 0)
                 
+                print(f"🚀 [TERMINAL] Parsed launch request:")
+                print(f"🚀 [TERMINAL]   Project: {project_name}")
+                print(f"🚀 [TERMINAL]   Path: {project_path}")
+                print(f"🚀 [TERMINAL]   Launch ID: {launch_id}")
+                
+                logger.info(f"🚀 Parsed launch data - Name: {project_name}, Path: {project_path}, ID: {launch_id}")
+                
                 if not project_name or not project_path:
+                    print(f"🚀 [TERMINAL] ERROR: Missing project name or path")
+                    logger.error("Invalid launch data: missing name or path")
                     return "❌ Invalid launch data"
                 
+                print(f"🚀 [TERMINAL] Calling launch_project_background()...")
                 # Launch in background immediately
                 result = launcher.launch_project_background(project_path, project_name, launch_id)
+                print(f"🚀 [TERMINAL] Background launch result: {result}")
                 logger.info(f"[{launch_id}] Instant launch triggered: {project_name}")
                 return result
                 
             except Exception as e:
                 error_msg = f"❌ Launch error: {str(e)}"
+                print(f"🚀 [TERMINAL] EXCEPTION: {error_msg}")
                 logger.error(f"Instant launch failed: {error_msg}")
                 return error_msg
         
@@ -495,10 +920,54 @@ def main():
             outputs=[scan_history]
         )
         
-        # Handle instant launches
+        # Connect search input for real-time filtering
+        search_input.change(
+            search_projects,
+            inputs=[search_input],
+            outputs=[projects_display, status_display]
+        )
+        
+        # Connect clear search button
+        clear_search_btn.click(
+            clear_search,
+            outputs=[search_input, projects_display, status_display]
+        )
+        
+        # Handle instant launches - Method 1: JSON input
         instant_launch_input.change(
             handle_instant_launch,
             inputs=[instant_launch_input],
+            outputs=[launch_output]
+        )
+        
+        # Handle instant launches - Method 2: Separate inputs + trigger
+        def handle_separate_launch(project_name, project_path):
+            """Handle launch using separate name/path inputs"""
+            print(f"\n🚀 [TERMINAL] handle_separate_launch() called")
+            print(f"🚀 [TERMINAL] Separate method - Project: {project_name}")
+            print(f"🚀 [TERMINAL] Separate method - Path: {project_path}")
+            logger.info(f"🚀 handle_separate_launch called - Name: {project_name}, Path: {project_path}")
+            
+            if not project_name or not project_path:
+                print(f"🚀 [TERMINAL] ERROR: Missing project name or path")
+                logger.error("Missing project name or path in separate launch")
+                return "❌ Missing project name or path"
+            
+            try:
+                print(f"🚀 [TERMINAL] Calling launch_project_background() via separate method...")
+                result = launcher.launch_project_background(project_path, project_name, 0)
+                print(f"🚀 [TERMINAL] Separate launch result: {result}")
+                logger.info(f"Separate launch triggered: {project_name}")
+                return result
+            except Exception as e:
+                error_msg = f"❌ Launch error: {str(e)}"
+                print(f"🚀 [TERMINAL] EXCEPTION in separate launch: {error_msg}")
+                logger.error(f"Separate launch failed: {error_msg}")
+                return error_msg
+        
+        launch_trigger.click(
+            handle_separate_launch,
+            inputs=[project_name_input, project_path_input],
             outputs=[launch_output]
         )
         
@@ -550,31 +1019,64 @@ def main():
     
     return app
 
-def find_available_port(start_port=7862, max_port=7872):
+def find_available_port(start_port=7870, max_port=7880):
     """Find an available port in the given range"""
     import socket
+    print(f"🚀 [TERMINAL] Searching for available port in range {start_port}-{max_port}")
+    
     for port in range(start_port, max_port + 1):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', port))
+                print(f"🚀 [TERMINAL] Found available port: {port}")
                 return port
         except OSError:
+            print(f"🚀 [TERMINAL] Port {port} is in use, trying next...")
             continue
+    
+    print(f"🚀 [TERMINAL] ERROR: No available ports found in range {start_port}-{max_port}")
     return None
 
 if __name__ == "__main__":
+    print("🚀 [TERMINAL] =================================")
+    print("🚀 [TERMINAL] Starting Persistent AI Project Launcher...")
+    print("🚀 [TERMINAL] =================================")
+    
     logger.info("Starting Persistent AI Project Launcher...")
-    app = main()
     
-    # Find available port
-    port = find_available_port()
-    if port is None:
-        print("❌ No available ports found in range 7862-7872")
-        exit(1)
-    
-    print("🚀 Persistent AI Project Launcher")
-    print(f"📱 Web interface: http://localhost:{port}")
-    print("💾 Using persistent database for project tracking")
-    print("🔄 Background scanning enabled")
-    print("⏰ Auto-refresh every 15 seconds")
-    app.launch(share=False, server_name="0.0.0.0", server_port=port) 
+    try:
+        print("🚀 [TERMINAL] Initializing application...")
+        app = main()
+        print("🚀 [TERMINAL] Application initialized successfully")
+        
+        # Find available port
+        print("🚀 [TERMINAL] Finding available port...")
+        port = find_available_port()
+        if port is None:
+            print("❌ No available ports found in range 7870-7880")
+            print("🚀 [TERMINAL] Please check if other services are using these ports")
+            print("🚀 [TERMINAL] You can check with: lsof -i :7870-7880")
+            exit(1)
+        
+        print("🚀 [TERMINAL] =================================")
+        print("🚀 Persistent AI Project Launcher")
+        print(f"📱 Web interface: http://localhost:{port}")
+        print("💾 Using persistent database for project tracking")
+        print("🔄 Background scanning enabled")
+        print("⏰ Auto-refresh every 15 seconds")
+        print("🔍 Real-time search and filtering")
+        print("🚀 [TERMINAL] =================================")
+        print(f"🚀 [TERMINAL] Starting Gradio server on port {port}...")
+        
+        logger.info(f"Starting Gradio server on port {port}")
+        app.launch(share=False, server_name="0.0.0.0", server_port=port)
+        
+    except KeyboardInterrupt:
+        print("\n🚀 [TERMINAL] Launcher stopped by user")
+        logger.info("Launcher stopped by user")
+    except Exception as e:
+        print(f"🚀 [TERMINAL] FATAL ERROR: {str(e)}")
+        logger.error(f"Fatal error during startup: {str(e)}")
+        import traceback
+        print(f"🚀 [TERMINAL] Traceback: {traceback.format_exc()}")
+        exit(1) 
