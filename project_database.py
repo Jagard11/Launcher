@@ -87,7 +87,9 @@ class ProjectDatabase:
             ('launch_confidence', 'REAL'),
             ('launch_notes', 'TEXT'),
             ('launch_analysis_method', 'TEXT'),
-            ('launch_analyzed_at', 'TIMESTAMP')
+            ('launch_analyzed_at', 'TIMESTAMP'),
+            ('is_favorite', 'BOOLEAN DEFAULT 0'),
+            ('is_hidden', 'BOOLEAN DEFAULT 0')
         ]
         
         for col_name, col_type in launch_columns:
@@ -293,6 +295,100 @@ class ProjectDatabase:
         
         if deleted > 0:
             logger.info(f"Cleaned up {deleted} old scan sessions")
+    
+    def toggle_favorite_status(self, path: str) -> bool:
+        """Toggle favorite status of a project and return new status"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get current status
+        cursor.execute('SELECT is_favorite FROM projects WHERE path = ?', (path,))
+        result = cursor.fetchone()
+        
+        if result is None:
+            conn.close()
+            logger.warning(f"Project not found for favorite toggle: {path}")
+            return False
+        
+        current_status = bool(result[0])
+        new_status = not current_status
+        
+        # Update status
+        cursor.execute(
+            'UPDATE projects SET is_favorite = ?, updated_at = ? WHERE path = ?',
+            (new_status, datetime.now().isoformat(), path)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Toggled favorite status for {path}: {current_status} -> {new_status}")
+        return new_status
+    
+    def toggle_hidden_status(self, path: str) -> bool:
+        """Toggle hidden status of a project and return new status"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Get current status
+        cursor.execute('SELECT is_hidden FROM projects WHERE path = ?', (path,))
+        result = cursor.fetchone()
+        
+        if result is None:
+            conn.close()
+            logger.warning(f"Project not found for hidden toggle: {path}")
+            return False
+        
+        current_status = bool(result[0])
+        new_status = not current_status
+        
+        # Update status
+        cursor.execute(
+            'UPDATE projects SET is_hidden = ?, updated_at = ? WHERE path = ?',
+            (new_status, datetime.now().isoformat(), path)
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Toggled hidden status for {path}: {current_status} -> {new_status}")
+        return new_status
+    
+    def get_favorite_projects(self) -> List[Dict]:
+        """Get all favorite projects"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_favorite = 1 ORDER BY name')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def get_hidden_projects(self) -> List[Dict]:
+        """Get all hidden projects"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_hidden = 1 ORDER BY name')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+    
+    def get_visible_projects(self) -> List[Dict]:
+        """Get all visible (non-hidden, non-favorite) projects"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM projects WHERE status = "active" AND is_hidden = 0 AND is_favorite = 0 ORDER BY name')
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
     
     def get_stats(self) -> Dict:
         """Get database statistics"""

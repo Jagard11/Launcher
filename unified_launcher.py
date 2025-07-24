@@ -45,61 +45,71 @@ class UnifiedLauncher:
             # Add custom CSS for styling (simplified version)
             gr.HTML("""
             <style>
-            .search-container {
-                position: sticky !important;
-                top: 0 !important;
-                z-index: 1000 !important;
-                background: linear-gradient(135deg, #ffffff, #f8f9fa) !important;
-                padding: 15px 20px !important;
-                border-bottom: 2px solid #e0e0e0 !important;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-                margin: -20px -20px 20px -20px !important;
-                backdrop-filter: blur(10px) !important;
-            }
+
             .search-input {
                 width: 100% !important;
-                max-width: 800px !important;
-                margin: 0 auto !important;
-                padding: 14px 20px 14px 50px !important;
-                border: 2px solid #007bff !important;
-                border-radius: 30px !important;
-                font-size: 16px !important;
+                max-width: none !important;
+                margin: 0 !important;
+                padding: 6px 12px !important;
+                border: 1px solid var(--border-primary) !important;
+                border-radius: 6px !important;
+                font-size: 14px !important;
                 outline: none !important;
-                transition: all 0.3s ease !important;
-                background: white !important;
+                transition: all 0.2s ease !important;
+                background: var(--bg-tertiary) !important;
+                color: var(--text-primary) !important;
             }
-            .project-card * {
-                color: #2c3e50 !important;
+            .search-input:focus {
+                border-color: var(--accent-blue) !important;
+                box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.2) !important;
+                background: var(--bg-hover) !important;
             }
+            .search-input::placeholder {
+                color: var(--text-muted) !important;
+            }
+            .search-label {
+                color: var(--text-secondary) !important;
+                font-weight: 500 !important;
+                font-size: 14px !important;
+                margin: 0 8px 0 0 !important;
+                display: inline-block !important;
+                white-space: nowrap !important;
+            }
+            .search-clear-btn {
+                background: var(--bg-tertiary) !important;
+                border: 1px solid var(--border-primary) !important;
+                border-radius: 6px !important;
+                width: 28px !important;
+                height: 28px !important;
+                padding: 0 !important;
+                margin-left: 8px !important;
+                color: var(--text-secondary) !important;
+                font-size: 12px !important;
+                transition: all 0.2s ease !important;
+                cursor: pointer !important;
+            }
+            .search-clear-btn:hover {
+                background: var(--accent-red) !important;
+                color: var(--text-primary) !important;
+                border-color: var(--accent-red) !important;
+            }
+            /* Project cards - will be styled in persistent_launcher.py */
             </style>
             """)
             
-            # Search bar
-            with gr.Row(elem_classes="search-container"):
-                with gr.Column():
-                    gr.HTML('<div style="margin-bottom: 10px; font-weight: 600; color: #2c3e50; text-align: center; font-size: 18px;">🔍 Search Projects</div>')
-                    with gr.Row():
-                        with gr.Column(scale=9):
-                            search_input = gr.Textbox(
-                                placeholder="Type to search projects by name, description, path, or environment...",
-                                elem_classes="search-input",
-                                show_label=False,
-                                container=False
-                            )
-                        with gr.Column(scale=1, min_width=60):
-                            clear_search_btn = gr.Button("✖️", size="sm")
+            # Note: Search bar is now fixed at the top - removed from here
             
-            # Status and controls
-            with gr.Row():
-                with gr.Column(scale=2):
+            # Status and controls - compact and clean
+            with gr.Row(elem_classes="status-controls"):
+                with gr.Column(scale=3):
                     status_display = gr.Markdown(f"""
-**Status:** Running • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}
+📊 **{stats['active_projects']} Projects** • 🔄 **{stats['dirty_projects']} Pending Updates**
                     """)
                 
-                with gr.Column(scale=1):
+                with gr.Column(scale=2):
                     with gr.Row():
-                        manual_scan_btn = gr.Button("🔄 Manual Scan", size="sm")
-                        process_dirty_btn = gr.Button("🤖 Process Updates", size="sm")
+                        manual_scan_btn = gr.Button("🔄 Scan", size="sm")
+                        process_dirty_btn = gr.Button("🤖 Process", size="sm")
                         refresh_btn = gr.Button("♻️ Refresh", size="sm")
             
             # Projects display
@@ -163,17 +173,7 @@ class UnifiedLauncher:
                 except Exception as e:
                     return f"❌ Launch error: {str(e)}"
             
-            # Wire up events
-            search_input.change(
-                handle_search,
-                inputs=[search_input],
-                outputs=[projects_display]
-            )
-            
-            clear_search_btn.click(
-                clear_search,
-                outputs=[search_input, projects_display]
-            )
+            # Note: Search events are wired up in the main function scope
             
             manual_scan_btn.click(
                 handle_manual_scan,
@@ -191,35 +191,11 @@ class UnifiedLauncher:
                 outputs=[launch_output]
             )
             
-            # Add JavaScript for launch functionality
+            # Add JavaScript for launch functionality and favorite/hide buttons
             gr.HTML(f"""
             <script>
-            function launchProject(projectName, projectPath) {{
-                console.log('🚀 [JS] Launch request:', projectName, 'at', projectPath);
-                
-                // Set hidden inputs
-                const nameInput = document.querySelector('#project_name_data input');
-                const pathInput = document.querySelector('#project_path_data input');
-                const launchBtn = document.querySelector('#launch_trigger');
-                
-                if (nameInput && pathInput && launchBtn) {{
-                    nameInput.value = projectName;
-                    nameInput.dispatchEvent(new Event('input'));
-                    
-                    pathInput.value = projectPath;
-                    pathInput.dispatchEvent(new Event('input'));
-                    
-                    // Trigger launch after a short delay
-                    setTimeout(() => {{
-                        launchBtn.click();
-                    }}, 100);
-                }} else {{
-                    console.error('🚀 [JS] Could not find required elements');
-                }}
-            }}
-            
-            // Make function globally available
-            window.launchProject = launchProject;
+            // Launch functionality is handled by global functions
+            console.log('🚀 [JS] App list tab JavaScript loaded');
             </script>
             """)
 
@@ -278,37 +254,378 @@ def main():
     
     # Create the main interface with custom tab buttons for URL routing
     with gr.Blocks(title="🚀 AI Project Launcher", theme=gr.themes.Soft()) as app:
+        # Add CSS for modern dark mode design
+        gr.HTML("""
+        <style>
+        /* Global Dark Mode Color Scheme */
+        :root {
+            /* Core Background Colors */
+            --bg-primary: #0f1419;        /* Main background - deep dark blue */
+            --bg-secondary: #1a1f2e;      /* Card/surface background */
+            --bg-tertiary: #252a3a;       /* Elevated surfaces */
+            --bg-hover: #2d3448;          /* Hover states */
+            
+            /* Accent Colors */
+            --accent-blue: #64b5f6;       /* Primary blue accent */
+            --accent-purple: #9c27b0;     /* Secondary purple */
+            --accent-green: #4caf50;      /* Success/positive */
+            --accent-orange: #ff9800;     /* Warning/attention */
+            --accent-red: #f44336;        /* Error/negative */
+            
+            /* Text Colors */
+            --text-primary: #e8eaed;      /* Primary text - light gray */
+            --text-secondary: #9aa0a6;    /* Secondary text - muted */
+            --text-muted: #5f6368;        /* Subtle text */
+            --text-accent: #64b5f6;       /* Accent text */
+            
+            /* Border and Divider Colors */
+            --border-primary: #3c4043;    /* Main borders */
+            --border-secondary: #5f6368;  /* Stronger borders */
+            --border-accent: #64b5f6;     /* Accent borders */
+            
+            /* Shadow and Effects */
+            --shadow-light: 0 2px 8px rgba(0,0,0,0.3);
+            --shadow-medium: 0 4px 16px rgba(0,0,0,0.4);
+            --shadow-heavy: 0 8px 24px rgba(0,0,0,0.5);
+            
+            /* Gradients */
+            --gradient-primary: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary));
+            --gradient-accent: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+        }
+        
+        /* Global Overrides for Dark Mode */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-secondary) var(--bg-secondary);
+        }
+        
+        *::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        *::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+        
+        *::-webkit-scrollbar-thumb {
+            background: var(--border-secondary);
+            border-radius: 4px;
+        }
+        
+        *::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+        
+        /* Fixed navigation bar - dark and professional */
+        .nav-container {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            z-index: 9999 !important;
+            background: var(--bg-secondary) !important;
+            border-bottom: 1px solid var(--border-primary) !important;
+            box-shadow: var(--shadow-medium) !important;
+            padding: 8px 16px !important;
+            backdrop-filter: blur(20px) !important;
+        }
+        
+        /* Navigation buttons - dark mode styling */
+        .nav-container .gradio-button {
+            margin: 0 6px !important;
+            font-weight: 500 !important;
+            font-size: 14px !important;
+            padding: 8px 20px !important;
+            border-radius: 8px !important;
+            transition: all 0.2s ease !important;
+            box-shadow: none !important;
+            border: 1px solid var(--border-primary) !important;
+            background: var(--bg-tertiary) !important;
+            color: var(--text-secondary) !important;
+        }
+        
+        .nav-container .gradio-button:hover {
+            transform: translateY(-1px) !important;
+            box-shadow: var(--shadow-light) !important;
+            background: var(--bg-hover) !important;
+            color: var(--text-primary) !important;
+        }
+        
+        /* Primary (active) button */
+        .nav-container .gradio-button.primary {
+            background: var(--accent-blue) !important;
+            border: 1px solid var(--accent-blue) !important;
+            color: var(--bg-primary) !important;
+            font-weight: 600 !important;
+        }
+        
+        .nav-container .gradio-button.primary:hover {
+            background: #81c4f7 !important;
+            border-color: #81c4f7 !important;
+        }
+        
+        /* Secondary (inactive) button */
+        .nav-container .gradio-button.secondary {
+            background: var(--bg-tertiary) !important;
+            border: 1px solid var(--border-primary) !important;
+            color: var(--text-secondary) !important;
+        }
+        
+        /* Fixed search container - dark mode */
+        .fixed-search-container {
+            position: fixed !important;
+            top: 50px !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            z-index: 9998 !important;
+            background: var(--bg-secondary) !important;
+            border-bottom: 1px solid var(--border-primary) !important;
+            padding: 8px 20px !important;
+            box-shadow: var(--shadow-light) !important;
+        }
+        
+        /* Main content area - dark background */
+        .main-content {
+            margin-top: 110px !important;
+            padding-top: 0 !important;
+            background: var(--bg-primary) !important;
+            min-height: calc(100vh - 110px) !important;
+        }
+        
+        /* When search is not visible, reduce main content margin */
+        .main-content.no-search {
+            margin-top: 60px !important;
+            min-height: calc(100vh - 60px) !important;
+        }
+        
+        /* Global body and gradio overrides */
+        body, .gradio-container {
+            background: var(--bg-primary) !important;
+            color: var(--text-primary) !important;
+        }
+        
+        /* App header - dark mode */
+        .app-header {
+            text-align: center !important;
+            padding: 16px 20px 12px 20px !important;
+            margin: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        
+        .app-header h1 {
+            color: var(--text-primary) !important;
+            margin: 0 0 4px 0 !important;
+            font-weight: 600 !important;
+            font-size: 24px !important;
+        }
+        
+        .app-header p {
+            color: var(--text-secondary) !important;
+            margin: 0 !important;
+            font-size: 14px !important;
+            font-weight: 400 !important;
+        }
+        
+        /* Warning message - dark mode */
+        .config-warning {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--accent-orange) !important;
+            border-radius: 8px !important;
+            padding: 12px 16px !important;
+            margin: 0 20px 16px 20px !important;
+            color: var(--accent-orange) !important;
+            font-weight: 500 !important;
+            font-size: 14px !important;
+        }
+        
+        /* Status and controls - dark mode */
+        .status-controls {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-primary) !important;
+            border-radius: 8px !important;
+            padding: 12px 16px !important;
+            margin: 0 20px 16px 20px !important;
+            box-shadow: var(--shadow-light) !important;
+        }
+        
+        .status-controls .gradio-button {
+            background: var(--bg-tertiary) !important;
+            border: 1px solid var(--border-primary) !important;
+            color: var(--text-secondary) !important;
+            border-radius: 6px !important;
+            padding: 6px 12px !important;
+            font-size: 13px !important;
+            font-weight: 500 !important;
+            transition: all 0.2s ease !important;
+        }
+        
+        .status-controls .gradio-button:hover {
+            background: var(--accent-blue) !important;
+            color: var(--bg-primary) !important;
+            border-color: var(--accent-blue) !important;
+        }
+        
+        /* Projects section header */
+        .projects-section h3 {
+            color: var(--text-primary) !important;
+            font-weight: 600 !important;
+            font-size: 18px !important;
+            margin: 0 0 12px 0 !important;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .nav-container {
+                padding: 6px 12px !important;
+            }
+            
+            .nav-container .gradio-button {
+                margin: 0 3px !important;
+                font-size: 12px !important;
+                padding: 6px 14px !important;
+            }
+            
+            .fixed-search-container {
+                top: 44px !important;
+                padding: 6px 16px !important;
+            }
+            
+            .main-content {
+                margin-top: 94px !important;
+                min-height: calc(100vh - 94px) !important;
+            }
+            
+            .main-content.no-search {
+                margin-top: 50px !important;
+                min-height: calc(100vh - 50px) !important;
+            }
+            
+            .app-header h1 {
+                font-size: 20px !important;
+            }
+            
+            .app-header p {
+                font-size: 13px !important;
+            }
+        }
+        </style>
+        """)
+        
         # State management for URL routing
         current_main_tab = gr.State(value=default_tab)
         current_subtab = gr.State(value="query")
         
-        gr.Markdown("# 🚀 AI Project Launcher")
-        gr.Markdown("Unified interface for discovering, managing, and launching your AI projects")
+        # Main tab buttons - Fixed navigation bar
+        with gr.Row(elem_classes="nav-container"):
+            app_list_btn = gr.Button("📱 App List", variant="primary" if default_tab == "app_list" else "secondary", size="lg")
+            database_btn = gr.Button("🗄️ Database", variant="secondary", size="lg")
+            settings_btn = gr.Button("⚙️ Settings", variant="primary" if default_tab == "settings" else "secondary", size="lg")
         
-        # Show configuration warning if needed
-        if not config.get('index_directories'):
-            gr.Markdown("⚠️ **Configuration Required:** No directories configured for indexing. Please configure directories in the Settings tab.")
+        # Fixed search bar for app list (only visible when app list is active)
+        with gr.Row(elem_classes="fixed-search-container", visible=(default_tab == "app_list")) as fixed_search_row:
+            with gr.Column(scale=1, min_width=120):
+                gr.HTML('<div class="search-label">🔍 Search</div>')
+            with gr.Column(scale=8):
+                fixed_search_input = gr.Textbox(
+                    placeholder="Type to search projects by name, description, path, or environment...",
+                    elem_classes="search-input",
+                    show_label=False,
+                    container=False
+                )
+            with gr.Column(scale=1, min_width=50):
+                fixed_clear_search_btn = gr.Button("✖️", size="sm", elem_classes="search-clear-btn")
         
-        # Main tab buttons
-        with gr.Row():
-            app_list_btn = gr.Button("App List", variant="primary" if default_tab == "app_list" else "secondary", size="lg")
-            database_btn = gr.Button("Database", variant="secondary", size="lg")
-            settings_btn = gr.Button("Settings", variant="primary" if default_tab == "settings" else "secondary", size="lg")
+        # Main content area with top margin to account for fixed header and search
+        with gr.Column(elem_classes="main-content"):
+            # App header
+            with gr.Column(elem_classes="app-header"):
+                gr.HTML("<h1>🚀 AI Project Launcher</h1>")
+                gr.HTML("<p>Unified interface for discovering, managing, and launching your AI projects</p>")
+            
+            # Show configuration warning if needed
+            if not config.get('index_directories'):
+                with gr.Column(elem_classes="config-warning"):
+                    gr.HTML("⚠️ <strong>Configuration Required:</strong> No directories configured for indexing. Please configure directories in the Settings tab.")
+            
+            # Content areas
+            with gr.Column(visible=(default_tab == "app_list")) as app_list_content:
+                if config.get('index_directories'):
+                    launcher.build_app_list_tab(args.api_port)
+                else:
+                    gr.Markdown("### 📁 No Directories Configured")
+                    gr.Markdown("Please configure directories to index in the **Settings** tab before using the launcher.")
+            
+            with gr.Column(visible=False) as database_content:
+                build_database_ui(launcher=launcher.persistent_launcher)
+            
+            # Settings tab content
+            with gr.Column(visible=(default_tab == "settings")) as settings_content:
+                build_settings_ui()
         
-        # Content areas
-        with gr.Column(visible=(default_tab == "app_list")) as app_list_content:
-            if config.get('index_directories'):
-                launcher.build_app_list_tab(args.api_port)
-            else:
-                gr.Markdown("### 📁 No Directories Configured")
-                gr.Markdown("Please configure directories to index in the **Settings** tab before using the launcher.")
+        # Global hidden components for favorite/hidden toggles (always available)
+        with gr.Row(visible=True):  # Temporarily visible for debugging
+            gr.HTML("<h4>🔧 DEBUG: Hidden Toggle Components (should be hidden in production)</h4>")
+            toggle_favorite_path = gr.Textbox(label="DEBUG: Favorite Path", elem_id="toggle_favorite_path")
+            toggle_hidden_path = gr.Textbox(label="DEBUG: Hidden Path", elem_id="toggle_hidden_path")
+            favorite_trigger = gr.Button("DEBUG: Toggle Favorite", elem_id="favorite_trigger")
+            hidden_trigger = gr.Button("DEBUG: Toggle Hidden", elem_id="hidden_trigger")
         
-        with gr.Column(visible=False) as database_content:
-            build_database_ui(launcher=launcher.persistent_launcher)
+        # Global handler functions for favorite/hidden toggles
+        def handle_toggle_favorite(project_path):
+            """Handle toggling favorite status via Gradio"""
+            try:
+                import requests
+                response = requests.post(
+                    f"http://localhost:{args.api_port}/api/toggle-favorite",
+                    headers={"Content-Type": "application/json"},
+                    json={"project_path": project_path}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('success'):
+                        print(f"✅ [GRADIO] Favorite toggled successfully for: {project_path}")
+                        return f"✅ Favorite toggled for project"
+                    else:
+                        print(f"❌ [GRADIO] Failed to toggle favorite: {data.get('error')}")
+                        return f"❌ Failed to toggle favorite: {data.get('error')}"
+                else:
+                    print(f"❌ [GRADIO] API request failed: {response.status_code}")
+                    return f"❌ API request failed: {response.status_code}"
+                    
+            except Exception as e:
+                print(f"❌ [GRADIO] Error toggling favorite: {str(e)}")
+                return f"❌ Error toggling favorite: {str(e)}"
         
-        # Settings tab content
-        with gr.Column(visible=(default_tab == "settings")) as settings_content:
-            build_settings_ui()
+        def handle_toggle_hidden(project_path):
+            """Handle toggling hidden status via Gradio"""
+            try:
+                import requests
+                response = requests.post(
+                    f"http://localhost:{args.api_port}/api/toggle-hidden",
+                    headers={"Content-Type": "application/json"},
+                    json={"project_path": project_path}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('success'):
+                        print(f"✅ [GRADIO] Hidden status toggled successfully for: {project_path}")
+                        return f"✅ Hidden status toggled for project"
+                    else:
+                        print(f"❌ [GRADIO] Failed to toggle hidden: {data.get('error')}")
+                        return f"❌ Failed to toggle hidden: {data.get('error')}"
+                else:
+                    print(f"❌ [GRADIO] API request failed: {response.status_code}")
+                    return f"❌ API request failed: {response.status_code}"
+                    
+            except Exception as e:
+                print(f"❌ [GRADIO] Error toggling hidden: {str(e)}")
+                return f"❌ Error toggling hidden: {str(e)}"
         
         # Tab switching functions
         def switch_to_app_list():
@@ -321,6 +638,7 @@ def main():
                 gr.update(visible=True),  # app_list_content
                 gr.update(visible=False),  # database_content
                 gr.update(visible=False),  # settings_content
+                gr.update(visible=True),  # fixed_search_row - show search bar
             )
         
         def switch_to_database():
@@ -333,6 +651,7 @@ def main():
                 gr.update(visible=False),  # app_list_content
                 gr.update(visible=True),  # database_content
                 gr.update(visible=False),  # settings_content
+                gr.update(visible=False),  # fixed_search_row - hide search bar
             )
         
         def switch_to_settings():
@@ -345,6 +664,7 @@ def main():
                 gr.update(visible=False),  # app_list_content
                 gr.update(visible=False),  # database_content
                 gr.update(visible=True),  # settings_content
+                gr.update(visible=False),  # fixed_search_row - hide search bar
             )
         
         # Wire up main tab buttons
@@ -353,7 +673,8 @@ def main():
             outputs=[
                 current_main_tab, current_subtab,
                 app_list_btn, database_btn, settings_btn,
-                app_list_content, database_content, settings_content
+                app_list_content, database_content, settings_content,
+                fixed_search_row
             ]
         )
         
@@ -362,7 +683,8 @@ def main():
             outputs=[
                 current_main_tab, current_subtab,
                 app_list_btn, database_btn, settings_btn,
-                app_list_content, database_content, settings_content
+                app_list_content, database_content, settings_content,
+                fixed_search_row
             ]
         )
         
@@ -371,8 +693,46 @@ def main():
             outputs=[
                 current_main_tab, current_subtab,
                 app_list_btn, database_btn, settings_btn,
-                app_list_content, database_content, settings_content
+                app_list_content, database_content, settings_content,
+                fixed_search_row
             ]
+        )
+        
+        # Wire up global favorite and hidden toggles (after content areas are defined)
+        # Note: These components are global so they work across all tabs
+        favorite_trigger.click(
+            handle_toggle_favorite,
+            inputs=[toggle_favorite_path],
+            outputs=[]  # We'll handle UI updates within the function
+        )
+        
+        hidden_trigger.click(
+            handle_toggle_hidden,
+            inputs=[toggle_hidden_path],
+            outputs=[]  # We'll handle UI updates within the function
+        )
+        
+        # Wire up fixed search bar events
+        def handle_fixed_search(query):
+            """Handle search from the fixed search bar"""
+            if hasattr(launcher, 'persistent_launcher') and hasattr(launcher.persistent_launcher, 'filter_projects'):
+                filtered_projects = launcher.persistent_launcher.filter_projects(query)
+                return launcher.persistent_launcher.create_projects_grid(filtered_projects, args.api_port)
+            return launcher.persistent_launcher.create_projects_grid(launcher.persistent_launcher.current_projects, args.api_port)
+        
+        def clear_fixed_search():
+            """Clear the fixed search bar"""
+            return "", launcher.persistent_launcher.create_projects_grid(launcher.persistent_launcher.current_projects, args.api_port)
+        
+        fixed_search_input.change(
+            handle_fixed_search,
+            inputs=[fixed_search_input],
+            outputs=[projects_display] if 'projects_display' in locals() else []
+        )
+        
+        fixed_clear_search_btn.click(
+            clear_fixed_search,
+            outputs=[fixed_search_input, projects_display] if 'projects_display' in locals() else [fixed_search_input]
         )
         
         # JavaScript for URL management
@@ -380,135 +740,351 @@ def main():
             fn=None,
             inputs=[],
             outputs=[],
-            js="""
-            function() {
+            js=f"""
+            function() {{
                 console.log('🚀 Unified Launcher URL Router: Initializing...');
                 
+                // Make API port available globally first
+                window.api_port = {args.api_port};
+                
+                // Define global functions for favorite/hide functionality
+                window.toggleFavorite = function(projectPath) {{
+                    console.log('🌟 [JS] Toggle favorite for:', projectPath);
+                    
+                    // Helper function to find elements with retry
+                    function findElements(attempt = 1, maxAttempts = 5) {{
+                        console.log(`🌟 [JS] Attempt ${{attempt}}/${{maxAttempts}} to find elements`);
+                        
+                        // Try multiple selector strategies for Gradio textboxes
+                        let pathInput = document.querySelector('#toggle_favorite_path input') || 
+                                       document.querySelector('#toggle_favorite_path textarea') ||
+                                       document.querySelector('#toggle_favorite_path [role="textbox"]') ||
+                                       document.querySelector('[id*="toggle_favorite_path"] input') ||
+                                       document.querySelector('[id*="toggle_favorite_path"] textarea') ||
+                                       document.querySelector('#toggle_favorite_path').querySelector('input') ||
+                                       document.querySelector('#toggle_favorite_path').querySelector('textarea');
+                        
+                        let triggerBtn = document.querySelector('#favorite_trigger') ||
+                                        document.querySelector('[id*="favorite_trigger"]') ||
+                                        document.querySelector('button[id*="favorite_trigger"]');
+                        
+                        console.log('🌟 [JS] Element search results:', {{
+                            pathInput: pathInput ? 'found' : 'not found',
+                            triggerBtn: triggerBtn ? 'found' : 'not found',
+                            pathInputId: pathInput ? pathInput.id : 'none',
+                            triggerBtnId: triggerBtn ? triggerBtn.id : 'none'
+                        }});
+                        
+                        if (pathInput && triggerBtn) {{
+                            console.log('🌟 [JS] Elements found! Proceeding with toggle...');
+                            
+                            pathInput.value = projectPath;
+                            pathInput.dispatchEvent(new Event('input'));
+                            pathInput.dispatchEvent(new Event('change'));
+                            
+                            // Trigger the hidden button and refresh after completion
+                            setTimeout(() => {{
+                                console.log('🌟 [JS] Clicking trigger button...');
+                                triggerBtn.click();
+                                
+                                // Wait a moment for the API call to complete, then refresh
+                                setTimeout(() => {{
+                                    console.log('🌟 [JS] Refreshing page after favorite toggle');
+                                    window.location.reload();
+                                }}, 1000);
+                            }}, 100);
+                            
+                            return true;
+                        }} else if (attempt < maxAttempts) {{
+                            // Log all available elements for debugging
+                            console.log('🌟 [JS] Available elements with "toggle" or "favorite" in ID:');
+                            document.querySelectorAll('[id*="toggle"], [id*="favorite"]').forEach(el => {{
+                                console.log('  -', el.tagName, el.id, el.className);
+                            }});
+                            
+                            // Retry after a delay
+                            setTimeout(() => findElements(attempt + 1, maxAttempts), 500);
+                            return false;
+                        }} else {{
+                            console.error('🌟 [JS] Could not find favorite toggle elements after', maxAttempts, 'attempts');
+                            console.log('🌟 [JS] All elements in document:');
+                            document.querySelectorAll('*[id]').forEach(el => {{
+                                if (el.id.includes('toggle') || el.id.includes('favorite')) {{
+                                    console.log('  -', el.tagName, el.id, el.type || 'no-type');
+                                }}
+                            }});
+                            return false;
+                        }}
+                    }}
+                    
+                    findElements();
+                }};
+                
+                window.toggleHidden = function(projectPath) {{
+                    console.log('👻 [JS] Toggle hidden for:', projectPath);
+                    
+                    // Helper function to find elements with retry
+                    function findElements(attempt = 1, maxAttempts = 5) {{
+                        console.log(`👻 [JS] Attempt ${{attempt}}/${{maxAttempts}} to find elements`);
+                        
+                        // Try multiple selector strategies for Gradio textboxes
+                        let pathInput = document.querySelector('#toggle_hidden_path input') || 
+                                       document.querySelector('#toggle_hidden_path textarea') ||
+                                       document.querySelector('#toggle_hidden_path [role="textbox"]') ||
+                                       document.querySelector('[id*="toggle_hidden_path"] input') ||
+                                       document.querySelector('[id*="toggle_hidden_path"] textarea') ||
+                                       document.querySelector('#toggle_hidden_path').querySelector('input') ||
+                                       document.querySelector('#toggle_hidden_path').querySelector('textarea');
+                        
+                        let triggerBtn = document.querySelector('#hidden_trigger') ||
+                                        document.querySelector('[id*="hidden_trigger"]') ||
+                                        document.querySelector('button[id*="hidden_trigger"]');
+                        
+                        console.log('👻 [JS] Element search results:', {{
+                            pathInput: pathInput ? 'found' : 'not found',
+                            triggerBtn: triggerBtn ? 'found' : 'not found',
+                            pathInputId: pathInput ? pathInput.id : 'none',
+                            triggerBtnId: triggerBtn ? triggerBtn.id : 'none'
+                        }});
+                        
+                        if (pathInput && triggerBtn) {{
+                            console.log('👻 [JS] Elements found! Proceeding with toggle...');
+                            
+                            pathInput.value = projectPath;
+                            pathInput.dispatchEvent(new Event('input'));
+                            pathInput.dispatchEvent(new Event('change'));
+                            
+                            // Trigger the hidden button and refresh after completion
+                            setTimeout(() => {{
+                                console.log('👻 [JS] Clicking trigger button...');
+                                triggerBtn.click();
+                                
+                                // Wait a moment for the API call to complete, then refresh
+                                setTimeout(() => {{
+                                    console.log('👻 [JS] Refreshing page after hidden toggle');
+                                    window.location.reload();
+                                }}, 1000);
+                            }}, 100);
+                            
+                            return true;
+                        }} else if (attempt < maxAttempts) {{
+                            // Log all available elements for debugging
+                            console.log('👻 [JS] Available elements with "toggle" or "hidden" in ID:');
+                            document.querySelectorAll('[id*="toggle"], [id*="hidden"]').forEach(el => {{
+                                console.log('  -', el.tagName, el.id, el.className);
+                            }});
+                            
+                            // Retry after a delay
+                            setTimeout(() => findElements(attempt + 1, maxAttempts), 500);
+                            return false;
+                        }} else {{
+                            console.error('👻 [JS] Could not find hidden toggle elements after', maxAttempts, 'attempts');
+                            console.log('👻 [JS] All elements in document:');
+                            document.querySelectorAll('*[id]').forEach(el => {{
+                                if (el.id.includes('toggle') || el.id.includes('hidden')) {{
+                                    console.log('  -', el.tagName, el.id, el.type || 'no-type');
+                                }}
+                            }});
+                            return false;
+                        }}
+                    }}
+                    
+                    findElements();
+                }};
+                
+                window.toggleHiddenSection = function() {{
+                    const section = document.getElementById('hidden-projects-section');
+                    const arrow = document.getElementById('hidden-toggle-arrow');
+                    
+                    if (section && arrow) {{
+                        if (section.style.display === 'none') {{
+                            section.style.display = 'block';
+                            arrow.textContent = '▲';
+                        }} else {{
+                            section.style.display = 'none';
+                            arrow.textContent = '▼';
+                        }}
+                    }}
+                }};
+                
+                window.launchProject = function(projectName, projectPath) {{
+                    console.log('🚀 [JS] Launch request:', projectName, 'at', projectPath);
+                    
+                    // Set hidden inputs
+                    const nameInput = document.querySelector('#project_name_data input');
+                    const pathInput = document.querySelector('#project_path_data input');
+                    const launchBtn = document.querySelector('#launch_trigger');
+                    
+                    if (nameInput && pathInput && launchBtn) {{
+                        nameInput.value = projectName;
+                        nameInput.dispatchEvent(new Event('input'));
+                        
+                        pathInput.value = projectPath;
+                        pathInput.dispatchEvent(new Event('input'));
+                        
+                        // Trigger launch after a short delay
+                        setTimeout(() => {{
+                            launchBtn.click();
+                        }}, 100);
+                    }} else {{
+                        console.error('🚀 [JS] Could not find required elements');
+                    }}
+                }};
+                
+                console.log('🌟 [JS] Global functions loaded via app.load():', {{
+                    toggleFavorite: typeof window.toggleFavorite,
+                    toggleHidden: typeof window.toggleHidden,
+                    toggleHiddenSection: typeof window.toggleHiddenSection,
+                    launchProject: typeof window.launchProject,
+                    api_port: window.api_port
+                }});
+                
+                // Debug: Log all elements with IDs to see what's available
+                console.log('🔍 [DEBUG] All elements with IDs in the document:');
+                const allElementsWithIds = document.querySelectorAll('*[id]');
+                allElementsWithIds.forEach(el => {{
+                    console.log('  -', el.tagName, el.id, el.type || 'no-type', el.style.display || 'default-display');
+                }});
+                
+                console.log('🔍 [DEBUG] Total elements with IDs:', allElementsWithIds.length);
+                
+                // Debug: Specifically look for any hidden elements
+                console.log('🔍 [DEBUG] Hidden elements (display: none):');
+                document.querySelectorAll('*[style*="display: none"], *[style*="display:none"]').forEach(el => {{
+                    console.log('  -', el.tagName, el.id || 'no-id', el.className || 'no-class');
+                }});
+                
+                // Debug: Look for Gradio containers
+                console.log('🔍 [DEBUG] Gradio containers:');
+                document.querySelectorAll('[class*="gradio"], [id*="gradio"]').forEach(el => {{
+                    console.log('  -', el.tagName, el.id || 'no-id', el.className || 'no-class');
+                }});
+                
                 // Function to update URL
-                function updateURL(tab, subtab = '') {
+                function updateURL(tab, subtab = '') {{
                     const url = new URL(window.location);
                     url.searchParams.set('tab', tab);
                     
-                    if (subtab && subtab !== '') {
+                    if (subtab && subtab !== '') {{
                         url.searchParams.set('subtab', subtab);
-                    } else {
+                    }} else {{
                         url.searchParams.delete('subtab');
-                    }
+                    }}
                     
-                    window.history.pushState({tab: tab, subtab: subtab}, '', url);
+                    window.history.pushState({{tab: tab, subtab: subtab}}, '', url);
                     console.log('🔗 URL updated:', url.href);
-                }
+                }}
                 
                 // Function to activate tab from URL on page load
-                function activateTabFromURL() {
+                function activateTabFromURL() {{
                     const urlParams = new URLSearchParams(window.location.search);
-                    const requestedTab = urlParams.get('tab') || '""" + default_tab + """';
+                    const requestedTab = urlParams.get('tab') || '{default_tab}';
                     const requestedSubtab = urlParams.get('subtab') || 'query';
                     
-                    console.log(`📍 Activating from URL: tab=${requestedTab}, subtab=${requestedSubtab}`);
+                    console.log(`📍 Activating from URL: tab=${{requestedTab}}, subtab=${{requestedSubtab}}`);
                     
                     // Find and click the appropriate main tab button
-                    setTimeout(() => {
+                    setTimeout(() => {{
                         const buttons = document.querySelectorAll('button');
                         
-                        for (const button of buttons) {
+                        for (const button of buttons) {{
                             const buttonText = button.textContent.toLowerCase().trim();
                             
                             if ((requestedTab === 'app_list' && buttonText === 'app list') ||
                                 (requestedTab === 'database' && buttonText === 'database') ||
-                                (requestedTab === 'settings' && buttonText === 'settings')) {
-                                console.log(`🎯 Clicking main tab: ${button.textContent}`);
+                                (requestedTab === 'settings' && buttonText === 'settings')) {{
+                                console.log(`🎯 Clicking main tab: ${{button.textContent}}`);
                                 button.click();
                                 
                                 // If database tab, also click subtab
-                                if (requestedTab === 'database') {
-                                    setTimeout(() => {
+                                if (requestedTab === 'database') {{
+                                    setTimeout(() => {{
                                         activateSubtab(requestedSubtab);
-                                    }, 300);
-                                }
+                                    }}, 300);
+                                }}
                                 break;
-                            }
-                        }
-                    }, 500);
-                }
+                            }}
+                        }}
+                    }}, 500);
+                }}
                 
                 // Function to activate subtab
-                function activateSubtab(requestedSubtab) {
-                    console.log(`🎯 Looking for subtab: ${requestedSubtab}`);
+                function activateSubtab(requestedSubtab) {{
+                    console.log(`🎯 Looking for subtab: ${{requestedSubtab}}`);
                     
                     const buttons = document.querySelectorAll('button');
                     
-                    for (const button of buttons) {
+                    for (const button of buttons) {{
                         const buttonText = button.textContent.toLowerCase().replace(/[🔍📋📊🛠️]/g, '').trim();
                         
                         if ((requestedSubtab === 'query' && buttonText === 'query') ||
                             (requestedSubtab === 'schema' && buttonText === 'schema') ||
                             (requestedSubtab === 'statistics' && buttonText === 'statistics') ||
-                            (requestedSubtab === 'tools' && buttonText === 'tools')) {
-                            console.log(`🎯 Clicking subtab: ${button.textContent}`);
+                            (requestedSubtab === 'tools' && buttonText === 'tools')) {{
+                            console.log(`🎯 Clicking subtab: ${{button.textContent}}`);
                             button.click();
                             break;
-                        }
-                    }
-                }
+                        }}
+                    }}
+                }}
                 
                 // Monitor button clicks to update URL
-                function setupButtonMonitoring() {
-                    const observer = new MutationObserver((mutations) => {
-                        mutations.forEach((mutation) => {
-                            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                function setupButtonMonitoring() {{
+                    const observer = new MutationObserver((mutations) => {{
+                        mutations.forEach((mutation) => {{
+                            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {{
                                 const button = mutation.target;
                                 
-                                if (button.tagName === 'BUTTON' && button.classList.contains('primary')) {
+                                if (button.tagName === 'BUTTON' && button.classList.contains('primary')) {{
                                     const buttonText = button.textContent.toLowerCase().trim();
-                                    console.log(`👆 Button activated: ${button.textContent}`);
+                                    console.log(`👆 Button activated: ${{button.textContent}}`);
                                     
                                     // Main tab buttons
-                                    if (buttonText === 'app list') {
+                                    if (buttonText === 'app list') {{
                                         updateURL('app_list');
-                                    } else if (buttonText === 'database') {
+                                    }} else if (buttonText === 'database') {{
                                         updateURL('database', 'query');
-                                    } else if (buttonText === 'settings') {
+                                    }} else if (buttonText === 'settings') {{
                                         updateURL('settings');
-                                    }
+                                    }}
                                     // Subtab buttons
-                                    else if (buttonText.includes('query')) {
+                                    else if (buttonText.includes('query')) {{
                                         updateURL('database', 'query');
-                                    } else if (buttonText.includes('schema')) {
+                                    }} else if (buttonText.includes('schema')) {{
                                         updateURL('database', 'schema');
-                                    } else if (buttonText.includes('statistics')) {
+                                    }} else if (buttonText.includes('statistics')) {{
                                         updateURL('database', 'statistics');
-                                    } else if (buttonText.includes('tools')) {
+                                    }} else if (buttonText.includes('tools')) {{
                                         updateURL('database', 'tools');
-                                    }
-                                }
-                            }
-                        });
-                    });
+                                    }}
+                                }}
+                            }}
+                        }});
+                    }});
                     
-                    observer.observe(document.body, {
+                    observer.observe(document.body, {{
                         attributes: true,
                         subtree: true,
                         attributeFilter: ['class']
-                    });
+                    }});
                     
                     console.log('📊 Button monitoring active');
-                }
+                }}
                 
                 // Handle browser back/forward
-                window.addEventListener('popstate', (event) => {
+                window.addEventListener('popstate', (event) => {{
                     console.log('⬅️ Browser navigation detected');
                     activateTabFromURL();
-                });
+                }});
                 
                 // Initialize
-                setTimeout(() => {
+                setTimeout(() => {{
                     setupButtonMonitoring();
                     activateTabFromURL();
-                }, 1000);
+                }}, 1000);
                 
                 return [];
-            }
+            }}
             """
         )
     

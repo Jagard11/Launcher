@@ -162,6 +162,62 @@ class LaunchAPIServer:
                 "timestamp": time.time(),
                 "method": request.method
             })
+        
+        @self.app.route('/api/toggle-favorite', methods=['POST'])
+        def toggle_favorite():
+            """Toggle favorite status of a project"""
+            try:
+                data = request.get_json()
+                if not data or 'project_path' not in data:
+                    return jsonify({"success": False, "error": "Missing project_path"}), 400
+                
+                project_path = data['project_path']
+                print(f"🌟 [API] Toggle favorite request for: {project_path}")
+                
+                # Import database here to avoid circular imports
+                from project_database import db
+                
+                new_status = db.toggle_favorite_status(project_path)
+                
+                print(f"🌟 [API] Favorite status toggled: {new_status}")
+                return jsonify({
+                    "success": True,
+                    "is_favorite": new_status,
+                    "project_path": project_path
+                })
+                
+            except Exception as e:
+                error_msg = f"Failed to toggle favorite: {str(e)}"
+                print(f"🌟 [API] ERROR: {error_msg}")
+                return jsonify({"success": False, "error": error_msg}), 500
+        
+        @self.app.route('/api/toggle-hidden', methods=['POST'])
+        def toggle_hidden():
+            """Toggle hidden status of a project"""
+            try:
+                data = request.get_json()
+                if not data or 'project_path' not in data:
+                    return jsonify({"success": False, "error": "Missing project_path"}), 400
+                
+                project_path = data['project_path']
+                print(f"👻 [API] Toggle hidden request for: {project_path}")
+                
+                # Import database here to avoid circular imports
+                from project_database import db
+                
+                new_status = db.toggle_hidden_status(project_path)
+                
+                print(f"👻 [API] Hidden status toggled: {new_status}")
+                return jsonify({
+                    "success": True,
+                    "is_hidden": new_status,
+                    "project_path": project_path
+                })
+                
+            except Exception as e:
+                error_msg = f"Failed to toggle hidden: {str(e)}"
+                print(f"👻 [API] ERROR: {error_msg}")
+                return jsonify({"success": False, "error": error_msg}), 500
     
     def open_terminal(self, command):
         """Opens a new terminal window and executes the given command - cross-platform"""

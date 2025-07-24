@@ -204,7 +204,7 @@ class PersistentLauncher:
         
         if not description or len(description.strip()) <= TRUNCATE_LENGTH:
             # Short descriptions don't need expansion
-            return f'<div style="color: #2c3e50 !important; line-height: 1.4;">{description}</div>'
+            return f'<div style="color: #e8eaed !important; line-height: 1.4;">{description}</div>'
         
         # Create truncated preview (first ~150 characters, cut at word boundary)
         truncated = description[:TRUNCATE_LENGTH]
@@ -216,10 +216,10 @@ class PersistentLauncher:
         preview_text = truncated.strip() + "..."
         
         return f"""
-        <details style="color: #2c3e50 !important; line-height: 1.4; margin: 0;">
+        <details style="color: #e8eaed !important; line-height: 1.4; margin: 0;">
             <summary style="
                 cursor: pointer;
-                color: #2c3e50 !important;
+                color: #e8eaed !important;
                 font-weight: normal;
                 list-style: none;
                 outline: none;
@@ -229,9 +229,9 @@ class PersistentLauncher:
                 position: relative;
                 display: block;
             ">
-                <span style="color: #2c3e50 !important;">{preview_text}</span>
+                <span style="color: #e8eaed !important;">{preview_text}</span>
                 <span style="
-                    color: #007bff !important;
+                    color: #64b5f6 !important;
                     font-size: 11px;
                     text-decoration: underline;
                     margin-left: 8px;
@@ -239,12 +239,12 @@ class PersistentLauncher:
                 "> ▼ Show full description</span>
             </summary>
             <div style="
-                color: #2c3e50 !important;
+                color: #e8eaed !important;
                 margin-top: 6px;
                 line-height: 1.4;
                 padding: 8px 0;
-                border-top: 1px solid #e0e0e0;
-                background: #f9f9f9;
+                border-top: 1px solid #3c4043;
+                background: #252a3a;
                 padding: 8px 12px;
                 border-radius: 6px;
             ">{description}</div>
@@ -278,21 +278,21 @@ class PersistentLauncher:
         else:
             time_str = "Never"
         
-        # Status badges
+        # Status badges - dark mode
         status_badges = []
         if dirty_flag:
-            status_badges.append('<span style="background: #ff6b6b; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">NEEDS UPDATE</span>')
+            status_badges.append('<span style="background: #f44336; color: #e8eaed; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">NEEDS UPDATE</span>')
         else:
-            status_badges.append('<span style="background: #51cf66; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">UP TO DATE</span>')
+            status_badges.append('<span style="background: #4caf50; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">UP TO DATE</span>')
         
         if project.get('is_git', False):
-            status_badges.append('<span style="background: #339af0; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">GIT</span>')
+            status_badges.append('<span style="background: #64b5f6; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">GIT</span>')
         
         # Add custom launcher status badge
         if has_custom_launcher:
-            status_badges.append('<span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">✅ LAUNCHER</span>')
+            status_badges.append('<span style="background: #4caf50; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">✅ LAUNCHER</span>')
         else:
-            status_badges.append('<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 10px; font-size: 10px;">❌ NO LAUNCHER</span>')
+            status_badges.append('<span style="background: #f44336; color: #e8eaed; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">❌ NO LAUNCHER</span>')
         
         # Description handling - ensure we have a valid string
         description = project.get('description') or project.get('tooltip') or 'AI/ML Project'
@@ -312,16 +312,20 @@ class PersistentLauncher:
         project_path_safe = str(project.get('path', '')).replace('\\', '/').replace("'", "&apos;")
         project_name_safe = str(project.get('name', 'Unknown')).replace("'", "&apos;")
 
-        # Conditional styling based on custom launcher availability
+        # Get favorite and hidden status
+        is_favorite = bool(project.get('is_favorite', False))
+        is_hidden = bool(project.get('is_hidden', False))
+        
+        # Dark mode styling based on custom launcher availability
         if has_custom_launcher:
-            card_border = "1px solid #e0e0e0"
-            card_background = "linear-gradient(145deg, #ffffff, #f8f9fa)"
-            card_shadow = "0 2px 8px rgba(0,0,0,0.1)"
+            card_border = "1px solid #3c4043"
+            card_background = "linear-gradient(145deg, #1a1f2e, #252a3a)"
+            card_shadow = "0 2px 8px rgba(0,0,0,0.3)"
         else:
             # Red highlighting for missing launcher
-            card_border = "2px solid #dc3545"
-            card_background = "linear-gradient(145deg, #fff5f5, #ffe6e6)"
-            card_shadow = "0 2px 12px rgba(220,53,69,0.25)"
+            card_border = "2px solid #f44336"
+            card_background = "linear-gradient(145deg, #2d1b1b, #3d2525)"
+            card_shadow = "0 2px 12px rgba(244,67,54,0.4)"
 
         return f"""
         <div class="project-card" id="{card_id}" style="
@@ -343,44 +347,65 @@ class PersistentLauncher:
                 " />
                 <div style="flex: 1; min-width: 0;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                        <h3 style="margin: 0; font-size: 16px; color: #2c3e50; font-weight: 600; flex: 1;">
+                        <h3 style="margin: 0; font-size: 16px; color: #e8eaed; font-weight: 600; flex: 1;">
                             {str(project.get('name', 'Unknown Project'))}
                         </h3>
-                        <div style="display: flex; gap: 8px; margin-left: 12px;">
-                            <button onclick="viewLaunchDetails('{project_path_safe}')" style="
-                                background: linear-gradient(135deg, #28a745, #20c997);
-                                color: white; 
-                                border: none; 
-                                padding: 6px 12px; 
-                                border-radius: 15px; 
+                        <div style="display: flex; gap: 6px; margin-left: 12px;">
+                            <button onclick="toggleFavorite('{project_path_safe}')" style="
+                                background: {'#ff9800' if is_favorite else '#5f6368'};
+                                color: {'#0f1419' if is_favorite else '#e8eaed'}; 
+                                border: 1px solid {'#ff9800' if is_favorite else '#3c4043'}; 
+                                padding: 6px 10px; 
+                                border-radius: 8px; 
                                 cursor: pointer; 
-                                font-size: 11px;
+                                font-size: 12px;
                                 font-weight: 600;
-                                box-shadow: 0 2px 4px rgba(40,167,69,0.3);
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
                                 transition: all 0.2s ease;
                                 text-decoration: none;
                                 display: inline-block;
-                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(40,167,69,0.4)'"
-                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(40,167,69,0.3)'">
-                                🔧 Edit Launch
+                                min-width: 32px;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'"
+                               title="{'Remove from favorites' if is_favorite else 'Add to favorites'}">
+                                ⭐
+                            </button>
+                            <button onclick="toggleHidden('{project_path_safe}')" style="
+                                background: {'#f44336' if is_hidden else '#5f6368'};
+                                color: {'#e8eaed' if is_hidden else '#e8eaed'}; 
+                                border: 1px solid {'#f44336' if is_hidden else '#3c4043'}; 
+                                padding: 6px 10px; 
+                                border-radius: 8px; 
+                                cursor: pointer; 
+                                font-size: 12px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                                min-width: 32px;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'"
+                               title="{'Show project' if is_hidden else 'Hide project'}">
+                                👻
                             </button>
                             <a href="http://localhost:{api_port}/launch?project_id={index}" 
                                target="_blank" 
                                style="
-                                background: linear-gradient(135deg, #007bff, #0056b3);
-                                color: white; 
-                                border: none; 
+                                background: linear-gradient(135deg, #64b5f6, #42a5f5);
+                                color: #0f1419; 
+                                border: 1px solid #64b5f6; 
                                 padding: 6px 12px; 
-                                border-radius: 15px; 
+                                border-radius: 8px; 
                                 cursor: pointer; 
                                 font-size: 11px;
                                 font-weight: 600;
-                                box-shadow: 0 2px 4px rgba(0,123,255,0.3);
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
                                 transition: all 0.2s ease;
                                 text-decoration: none;
                                 display: inline-block;
-                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 8px rgba(0,123,255,0.4)'"
-                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(0,123,255,0.3)'">
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(100,181,246,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'">
                                 🚀 Launch
                             </a>
                         </div>
@@ -389,12 +414,12 @@ class PersistentLauncher:
                         {' '.join(status_badges)}
                     </div>
                     <div style="
-                        font-size: 12px; color: #2c3e50 !important; margin: 0 0 8px 0; 
+                        font-size: 12px; color: #e8eaed; margin: 0 0 8px 0; 
                         line-height: 1.4;
                     ">
                         {self._create_expandable_description(description)}
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #868e96;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #5f6368;">
                         <span>🐍 {env_type} • 📝 {main_script}</span>
                         <span>Last: {time_str}</span>
                     </div>
@@ -404,30 +429,225 @@ class PersistentLauncher:
         """
     
     def create_projects_grid(self, projects: List[Dict], api_port: int = 7871) -> str:
-        """Create responsive grid of project cards"""
+        """Create responsive grid of project cards with favorites and hidden sections"""
         if not projects:
             return """
-            <div style="text-align: center; padding: 40px; color: #6c757d;">
-                <h3>No projects found</h3>
+            <div style="text-align: center; padding: 40px; color: #9aa0a6;">
+                <h3 style="color: #e8eaed;">No projects found</h3>
                 <p>The background scanner will automatically discover projects in your configured directories.</p>
             </div>
             """
         
-        grid_html = f"""
-        <div style="
-            display: grid; 
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
-            gap: 16px; 
-            padding: 16px;
-        ">
-        """
+        # Separate projects into categories
+        favorites = []
+        visible = []
+        hidden = []
         
         for i, project in enumerate(projects):
-            grid_html += self.create_project_card(project, i, api_port)
+            if project.get('is_favorite', False):
+                favorites.append((project, i))
+            elif project.get('is_hidden', False):
+                hidden.append((project, i))
+            else:
+                visible.append((project, i))
         
-        grid_html += "</div>"
+        grid_html = ""
         
-        # No JavaScript needed - using direct HTML links for API calls
+        # Favorites section (shown only if there are favorites)
+        if favorites:
+            grid_html += """
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: #ff9800; margin: 0 0 12px 16px; font-size: 18px; font-weight: 600; display: flex; align-items: center;">
+                    ⭐ Favorites
+                </h3>
+                <div style="
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                    gap: 16px; 
+                    padding: 0 16px;
+                    border-left: 4px solid #ff9800;
+                    margin-left: 16px;
+                    padding-left: 20px;
+                ">
+            """
+            
+            for project, index in favorites:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += "</div></div>"
+        
+        # Regular projects section
+        if visible:
+            section_title = "All Projects" if not favorites else "Projects"
+            grid_html += f"""
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: #e8eaed; margin: 0 0 12px 16px; font-size: 18px; font-weight: 600;">
+                    📋 {section_title}
+                </h3>
+                <div style="
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                    gap: 16px; 
+                    padding: 0 16px;
+                ">
+            """
+            
+            for project, index in visible:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += "</div></div>"
+        
+        # Hidden projects section (expandable, shown only if there are hidden projects)
+        if hidden:
+            grid_html += f"""
+            <div style="margin-top: 20px;">
+                <div style="margin: 0 16px;">
+                    <button onclick="toggleHiddenSection()" style="
+                        background: #5f6368;
+                        color: #e8eaed;
+                        border: 1px solid #3c4043;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: 600;
+                        margin-bottom: 12px;
+                        transition: all 0.2s ease;
+                    " onmouseover="this.style.background='#2d3448'; this.style.borderColor='#5f6368'"
+                       onmouseout="this.style.background='#5f6368'; this.style.borderColor='#3c4043'">
+                        👻 Hidden Projects ({len(hidden)}) <span id="hidden-toggle-arrow">▼</span>
+                    </button>
+                </div>
+                <div id="hidden-projects-section" style="
+                    display: none;
+                    border-left: 4px solid #5f6368;
+                    margin-left: 16px;
+                    padding-left: 20px;
+                ">
+                    <div style="
+                        display: grid; 
+                        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                        gap: 16px; 
+                        padding: 0 16px;
+                    ">
+            """
+            
+            for project, index in hidden:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += """
+                    </div>
+                </div>
+            </div>
+            """
+        
+        # Add JavaScript for hidden section toggle and favorite/hidden buttons
+        grid_html += f"""
+        <script>
+        // Make API port available to JavaScript functions
+        const api_port = {api_port};
+        
+        function toggleHiddenSection() {{
+            const section = document.getElementById('hidden-projects-section');
+            const arrow = document.getElementById('hidden-toggle-arrow');
+            
+            if (section.style.display === 'none') {{
+                section.style.display = 'block';
+                arrow.textContent = '▲';
+            }} else {{
+                section.style.display = 'none';
+                arrow.textContent = '▼';
+            }}
+        }}
+        
+                 function toggleFavorite(projectPath) {{
+             console.log('🌟 [JS] Toggle favorite for:', projectPath);
+             
+             // Call API to toggle favorite status
+             fetch(`http://localhost:${api_port}/api/toggle-favorite`, {{
+                 method: 'POST',
+                 headers: {{
+                     'Content-Type': 'application/json',
+                 }},
+                 body: JSON.stringify({{
+                     project_path: projectPath
+                 }})
+             }})
+             .then(response => response.json())
+             .then(data => {{
+                 console.log('🌟 [JS] API response:', data);
+                 if (data.success) {{
+                     console.log('🌟 [JS] Successfully toggled favorite, triggering refresh...');
+                     
+                     // Trigger the hidden refresh button
+                     const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
+                     if (hiddenRefreshBtn) {{
+                         hiddenRefreshBtn.click();
+                         console.log('🌟 [JS] Triggered hidden refresh');
+                     }} else {{
+                         console.log('🌟 [JS] Hidden refresh button not found, using page reload');
+                         setTimeout(() => {{
+                             window.location.reload();
+                         }}, 500);
+                     }}
+                 }} else {{
+                     console.error('Failed to toggle favorite:', data.error);
+                     alert('Failed to toggle favorite: ' + data.error);
+                 }}
+             }})
+             .catch(error => {{
+                 console.error('Error toggling favorite:', error);
+                 alert('Error toggling favorite: ' + error);
+             }});
+         }}
+         
+         function toggleHidden(projectPath) {{
+             console.log('👻 [JS] Toggle hidden for:', projectPath);
+             
+             // Call API to toggle hidden status
+             fetch(`http://localhost:${api_port}/api/toggle-hidden`, {{
+                 method: 'POST',
+                 headers: {{
+                     'Content-Type': 'application/json',
+                 }},
+                 body: JSON.stringify({{
+                     project_path: projectPath
+                 }})
+             }})
+             .then(response => response.json())
+             .then(data => {{
+                 console.log('👻 [JS] API response:', data);
+                 if (data.success) {{
+                     console.log('👻 [JS] Successfully toggled hidden, triggering refresh...');
+                     
+                     // Trigger the hidden refresh button
+                     const hiddenRefreshBtn = document.querySelector('#hidden_refresh_trigger');
+                     if (hiddenRefreshBtn) {{
+                         hiddenRefreshBtn.click();
+                         console.log('👻 [JS] Triggered hidden refresh');
+                     }} else {{
+                         console.log('👻 [JS] Hidden refresh button not found, using page reload');
+                         setTimeout(() => {{
+                             window.location.reload();
+                         }}, 500);
+                     }}
+                 }} else {{
+                     console.error('Failed to toggle hidden:', data.error);
+                     alert('Failed to toggle hidden: ' + data.error);
+                 }}
+             }})
+             .catch(error => {{
+                 console.error('Error toggling hidden:', error);
+                 alert('Error toggling hidden: ' + error);
+             }});
+         }}
+        
+        // Make functions globally available
+        window.toggleHiddenSection = toggleHiddenSection;
+        window.toggleFavorite = toggleFavorite;
+        window.toggleHidden = toggleHidden;
+        </script>
+        """
         
         return grid_html
     
@@ -1247,6 +1467,10 @@ def main(api_port=7871):
             project_path_input = gr.Textbox(elem_id="project_path_data")
             launch_trigger = gr.Button("Launch", elem_id="launch_trigger")
         
+        # Hidden refresh button for JavaScript to trigger
+        with gr.Row(visible=False):
+            hidden_refresh_trigger = gr.Button("Hidden Refresh", elem_id="hidden_refresh_trigger")
+        
         # TEST: Simple communication test
         with gr.Row():
             test_input = gr.Textbox(label="Communication Test", placeholder="Type anything and press Enter to test", elem_id="test_input")
@@ -1434,6 +1658,12 @@ def main(api_port=7871):
         
         # Wire up events
         refresh_btn.click(
+            refresh_display,
+            outputs=[projects_display, status_display]
+        )
+        
+        # Wire up hidden refresh trigger for JavaScript
+        hidden_refresh_trigger.click(
             refresh_display,
             outputs=[projects_display, status_display]
         )
