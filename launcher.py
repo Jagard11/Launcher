@@ -4,8 +4,15 @@ import gradio as gr
 import argparse
 import sys
 import logging
+import json
+import time
+import threading
+import socket
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
+from datetime import datetime
+import platform
+import shutil
 
 # Import existing modules
 from project_database import db
@@ -15,13 +22,18 @@ from background_scanner import get_scanner
 from environment_detector import EnvironmentDetector
 from logger import logger
 from launch_api_server import start_api_server
-from persistent_launcher import PersistentLauncher, load_config, find_available_port
 
 class UnifiedLauncher:
     def __init__(self, config: dict, verbose: bool = False):
         self.config = config
         self.verbose = verbose
-        self.persistent_launcher = PersistentLauncher(config)
+        self.env_detector = EnvironmentDetector()
+        self.current_projects = []
+        self.scanner = None
+        
+        # UI state tracking
+        self.ui_needs_refresh = False
+        self.last_ui_update = time.time()
         
         # Configure logging based on verbose flag
         if verbose:
@@ -33,10 +45,733 @@ class UnifiedLauncher:
             logging.getLogger("AILauncher").setLevel(logging.WARNING)
             logging.getLogger().setLevel(logging.WARNING)
     
+    def open_terminal(self, command):
+        """Opens a new terminal window and executes the given command - cross-platform"""
+        import platform
+        import shutil
+        import subprocess
+        
+        os_name = platform.system()
+        print(f"🚀 [UNIFIED] Opening terminal on {os_name} with command: {command[:100]}...")
+        logger.info(f"Opening terminal on {os_name}")
+        
+        try:
+            if os_name == "Windows":
+                # Opens a new cmd window, runs the command, and keeps it open (/k)
+                subprocess.Popen(['cmd', '/c', 'start', 'cmd.exe', '/k', command])
+            elif os_name == "Linux":
+                # Try different terminal emulators in order of preference
+                terminals_to_try = [
+                    'gnome-terminal',
+                    'konsole', 
+                    'xfce4-terminal',
+                    'mate-terminal',
+                    'lxterminal',
+                    'terminator',
+                    'xterm'
+                ]
+                
+                terminal_found = None
+                for terminal in terminals_to_try:
+                    if shutil.which(terminal):
+                        terminal_found = terminal
+                        print(f"🚀 [UNIFIED] Found terminal: {terminal}")
+                        break
+                
+                if not terminal_found:
+                    raise OSError("No suitable terminal emulator found. Please install gnome-terminal, konsole, or xterm.")
+                
+                # Execute command based on terminal type
+                if terminal_found == 'gnome-terminal':
+                    subprocess.Popen([terminal_found, '--', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found == 'konsole':
+                    subprocess.Popen([terminal_found, '-e', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found in ['xfce4-terminal', 'mate-terminal', 'lxterminal']:
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                elif terminal_found == 'terminator':
+                    subprocess.Popen([terminal_found, '-x', 'bash', '-c', f'{command}; exec bash'])
+                elif terminal_found == 'xterm':
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                else:
+                    # Fallback for any other terminal
+                    subprocess.Popen([terminal_found, '-e', f'bash -c "{command}; exec bash"'])
+                    
+            elif os_name == "Darwin":  # macOS
+                # Uses AppleScript to open Terminal.app and run the command
+                subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "{command}"'])
+            else:
+                raise OSError(f"Unsupported operating system: {os_name}")
+                
+            print(f"🚀 [UNIFIED] Terminal opened successfully")
+            logger.info("Terminal opened successfully")
+            return "Terminal launched successfully!"
+            
+        except Exception as e:
+            error_msg = f"Error launching terminal: {str(e)}"
+            print(f"🚀 [UNIFIED] ERROR: {error_msg}")
+            logger.error(error_msg)
+            return error_msg
+    
+    def initialize(self):
+        """Initialize the launcher - load from database and start background scanner"""
+        logger.info("Initializing Unified AI Launcher...")
+        
+        # Load existing projects from database
+        self.load_projects_from_db()
+        
+        # Start background scanner
+        self.scanner = get_scanner(self.config, self.on_scanner_update)
+        self.scanner.start()
+        
+        logger.info(f"Launcher initialized with {len(self.current_projects)} projects")
+    
+    def load_projects_from_db(self):
+        """Load projects from database"""
+        try:
+            self.current_projects = db.get_all_projects(active_only=True)
+            logger.info(f"Loaded {len(self.current_projects)} projects from database")
+            self.last_ui_update = time.time()
+        except Exception as e:
+            logger.error(f"Error loading projects from database: {e}")
+            self.current_projects = []
+    
+    def filter_projects(self, search_query: str) -> List[Dict]:
+        """Filter projects based on search query with fuzzy matching"""
+        if not search_query or not search_query.strip():
+            return self.current_projects
+        
+        search_terms = search_query.lower().strip().split()
+        filtered_projects = []
+        
+        for project in self.current_projects:
+            # Create searchable text from project data - ensure all fields are strings
+            searchable_fields = [
+                str(project.get('name', '') or ''),
+                str(project.get('display_name', '') or ''),
+                str(project.get('description', '') or ''),
+                str(project.get('tooltip', '') or ''),
+                str(project.get('path', '') or '').replace('/', ' ').replace('\\', ' '),  # Make paths searchable
+                str(project.get('environment_type', '') or ''),
+                str(project.get('main_script', '') or ''),
+            ]
+            
+            # Filter out any remaining None or empty values
+            searchable_fields = [field for field in searchable_fields if field and field != 'None']
+            searchable_text = " ".join(searchable_fields).lower()
+            
+            # Calculate match score
+            match_score = 0
+            max_possible_score = len(search_terms)
+            
+            for term in search_terms:
+                if term in searchable_text:
+                    match_score += 1
+                    # Boost score for exact name matches
+                    if term in project.get('name', '').lower():
+                        match_score += 0.5
+                    # Boost score for environment type matches
+                    if term == project.get('environment_type', '').lower():
+                        match_score += 0.3
+            
+            # Include project if it matches all terms or has a high partial match
+            if match_score >= max_possible_score or (match_score / max_possible_score) >= 0.7:
+                # Add match score for potential sorting
+                project_copy = project.copy()
+                project_copy['_match_score'] = match_score
+                filtered_projects.append(project_copy)
+        
+        # Sort by match score (highest first)
+        filtered_projects.sort(key=lambda x: x.get('_match_score', 0), reverse=True)
+        
+        return filtered_projects
+    
+    def rebuild_launch_commands(self) -> str:
+        """Rebuild all launch commands by marking all projects as dirty for background processing"""
+        try:
+            from project_database import db
+            
+            # Get all projects
+            all_projects = db.get_all_projects(active_only=False)
+            
+            if not all_projects:
+                return "❌ No projects found in database"
+            
+            # Mark all projects as dirty for re-analysis
+            dirty_count = 0
+            for project in all_projects:
+                project_path = project.get('path')
+                if project_path:
+                    # Mark as dirty in database
+                    db.mark_project_dirty(project_path)
+                    dirty_count += 1
+            
+            logger.info(f"Marked {dirty_count} projects as dirty for launch command rebuild")
+            
+            return f"✅ Marked {dirty_count} projects for launch command rebuild. Background scanner will process them shortly."
+            
+        except Exception as e:
+            logger.error(f"Error rebuilding launch commands: {e}")
+            return f"❌ Error rebuilding launch commands: {str(e)}"
+    
+    def force_reanalyze_project(self, project_path: str) -> str:
+        """Force re-analysis of a specific project's launch command"""
+        try:
+            if not project_path or not project_path.strip():
+                return "❌ Please provide a valid project path"
+            
+            project_path = project_path.strip()
+            
+            # Check if project exists in database
+            from project_database import db
+            project_data = db.get_project_by_path(project_path)
+            
+            if not project_data:
+                return f"❌ Project not found in database: {project_path}"
+            
+            # Check if path actually exists
+            if not Path(project_path).exists():
+                return f"❌ Project path does not exist: {project_path}"
+            
+            # Use QwenLaunchAnalyzer to re-analyze
+            from qwen_launch_analyzer import QwenLaunchAnalyzer
+            analyzer = QwenLaunchAnalyzer()
+            
+            project_name = project_data.get('name', Path(project_path).name)
+            env_type = project_data.get('environment_type', 'none')
+            env_name = project_data.get('environment_name', '')
+            
+            # Generate new launch analysis
+            launch_analysis = analyzer.generate_launch_command(
+                project_path, project_name, env_type, env_name
+            )
+            
+            # Update database with new analysis
+            update_data = {
+                'path': project_path,
+                'launch_command': launch_analysis.get('launch_command', ''),
+                'launch_type': launch_analysis.get('launch_type', 'unknown'),
+                'launch_working_directory': launch_analysis.get('working_directory', '.'),
+                'launch_args': launch_analysis.get('requires_args', ''),
+                'launch_confidence': launch_analysis.get('confidence', 0.0),
+                'launch_notes': launch_analysis.get('notes', ''),
+                'launch_analysis_method': launch_analysis.get('analysis_method', 'manual_reanalysis'),
+                'launch_analyzed_at': launch_analysis.get('analyzed_at', time.time()),
+                'main_script': launch_analysis.get('main_script', ''),
+                'dirty_flag': 0,  # Clear dirty flag since we just analyzed
+                'last_scanned': time.time()
+            }
+            
+            db.upsert_project(update_data)
+            
+            # Generate result message
+            result_parts = [
+                f"✅ Re-analyzed project: {project_name}",
+                f"   📁 Path: {project_path}",
+                f"   🚀 Launch Command: {launch_analysis.get('launch_command', 'None')}",
+                f"   🎯 Confidence: {launch_analysis.get('confidence', 0.0):.1%}",
+                f"   📝 Method: {launch_analysis.get('analysis_method', 'unknown')}"
+            ]
+            
+            if launch_analysis.get('custom_launcher_path'):
+                result_parts.append(f"   📄 Custom Launcher: {launch_analysis['custom_launcher_path']}")
+            
+            if launch_analysis.get('notes'):
+                result_parts.append(f"   💡 Notes: {launch_analysis['notes']}")
+            
+            logger.info(f"Re-analyzed project {project_name}: {launch_analysis.get('launch_command')}")
+            
+            return "\n".join(result_parts)
+            
+        except Exception as e:
+            logger.error(f"Error re-analyzing project {project_path}: {e}")
+            return f"❌ Error re-analyzing project: {str(e)}"
+    
+    def on_scanner_update(self, event_type: str, data: Dict):
+        """Handle updates from background scanner"""
+        try:
+            if event_type == 'project_added':
+                self.current_projects.append(data)
+                self.ui_needs_refresh = True
+                logger.info(f"Added new project to UI: {data.get('name', 'Unknown')}")
+                
+            elif event_type == 'project_updated':
+                # Update existing project in list
+                for i, project in enumerate(self.current_projects):
+                    if project['path'] == data['path']:
+                        self.current_projects[i].update(data)
+                        break
+                self.ui_needs_refresh = True
+                logger.info(f"Updated project in UI: {data.get('name', 'Unknown')}")
+                
+            elif event_type == 'scan_complete':
+                scan_info = data
+                logger.info(f"Scan complete: {scan_info['scan_type']} - "
+                          f"Found: {scan_info['projects_found']}, "
+                          f"Updated: {scan_info['projects_updated']}")
+                
+                # Reload projects to ensure UI is in sync
+                self.load_projects_from_db()
+                self.ui_needs_refresh = True
+                
+        except Exception as e:
+            logger.error(f"Error handling scanner update: {e}")
+    
+    def _create_expandable_description(self, description: str) -> str:
+        """Create an expandable description using HTML5 details/summary elements"""
+        # Ensure description is always a string
+        description = str(description or 'AI/ML Project')
+        
+        # Define truncation length for consistent card heights
+        TRUNCATE_LENGTH = 150
+        
+        if not description or len(description.strip()) <= TRUNCATE_LENGTH:
+            # Short descriptions don't need expansion
+            return f'<div style="color: #e8eaed !important; line-height: 1.4;">{description}</div>'
+        
+        # Create truncated preview (first ~150 characters, cut at word boundary)
+        truncated = description[:TRUNCATE_LENGTH]
+        # Find the last space to avoid cutting words
+        last_space = truncated.rfind(' ')
+        if last_space > TRUNCATE_LENGTH * 0.8:  # Only cut at word boundary if it's not too short
+            truncated = truncated[:last_space]
+        
+        preview_text = truncated.strip() + "..."
+        
+        return f"""
+        <details style="color: #e8eaed !important; line-height: 1.4; margin: 0;">
+            <summary style="
+                cursor: pointer;
+                color: #e8eaed !important;
+                font-weight: normal;
+                list-style: none;
+                outline: none;
+                user-select: none;
+                padding: 2px 0;
+                margin: 0;
+                position: relative;
+                display: block;
+            ">
+                <span style="color: #e8eaed !important;">{preview_text}</span>
+                <span style="
+                    color: #64b5f6 !important;
+                    font-size: 11px;
+                    text-decoration: underline;
+                    margin-left: 8px;
+                    font-weight: normal;
+                "> ▼ Show full description</span>
+            </summary>
+            <div style="
+                color: #e8eaed !important;
+                margin-top: 6px;
+                line-height: 1.4;
+                padding: 8px 0;
+                border-top: 1px solid #3c4043;
+                background: #252a3a;
+                padding: 8px 12px;
+                border-radius: 6px;
+            ">{description}</div>
+        </details>
+        """
+    
+    def create_project_card(self, project: Dict, index: int, api_port: int = 7871) -> str:
+        """Create HTML for a single project card"""
+        # Get status indicators
+        env_type = project.get('environment_type', 'unknown')
+        main_script = project.get('main_script', 'Unknown')
+        last_scanned = project.get('last_scanned', '')
+        dirty_flag = project.get('dirty_flag', 1)
+        
+        # Check if custom launcher exists
+        project_name = project.get('name', 'Unknown')
+        project_path = project.get('path', '')
+        safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+        custom_launcher_path = Path("custom_launchers") / f"{safe_name}.sh"
+        has_custom_launcher = custom_launcher_path.exists()
+        
+        # Escape variables for safe JavaScript usage
+        escaped_name = project_name.replace("'", "\\'").replace('"', '\\"')
+        escaped_path = project_path.replace("'", "\\'").replace('"', '\\"')
+        
+        # Format last scanned time
+        if last_scanned:
+            try:
+                if isinstance(last_scanned, str):
+                    scan_time = datetime.fromisoformat(last_scanned)
+                else:
+                    scan_time = datetime.fromtimestamp(float(last_scanned))
+                time_str = scan_time.strftime("%m/%d %H:%M")
+            except:
+                time_str = "Unknown"
+        else:
+            time_str = "Never"
+        
+        # Status badges - dark mode
+        status_badges = []
+        if dirty_flag:
+            status_badges.append('<span style="background: #f44336; color: #e8eaed; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">NEEDS UPDATE</span>')
+        else:
+            status_badges.append('<span style="background: #4caf50; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">UP TO DATE</span>')
+        
+        if project.get('is_git', False):
+            status_badges.append('<span style="background: #64b5f6; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">GIT</span>')
+        
+        # Add custom launcher status badge
+        if has_custom_launcher:
+            status_badges.append('<span style="background: #4caf50; color: #0f1419; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">✅ LAUNCHER</span>')
+        else:
+            status_badges.append('<span style="background: #f44336; color: #e8eaed; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-weight: 500;">❌ NO LAUNCHER</span>')
+        
+        # Description handling - ensure we have a valid string
+        description = project.get('description') or project.get('tooltip') or 'AI/ML Project'
+        if not description or description == 'No description available' or description == 'None':
+            description = project.get('tooltip') or f"AI project: {project.get('name', 'Unknown')}"
+        
+        # Ensure description is a string
+        description = str(description or 'AI/ML Project')
+        
+        # Create unique IDs for this card
+        card_id = f"card_{index}"
+        
+        # Escape project path for JavaScript - avoid backslashes in f-strings
+        project_path_safe = str(project.get('path', '')).replace('\\', '/').replace("'", "&apos;")
+        project_name_safe = str(project.get('name', 'Unknown')).replace("'", "&apos;")
+
+        # Get favorite and hidden status
+        is_favorite = bool(project.get('is_favorite', False))
+        is_hidden = bool(project.get('is_hidden', False))
+        
+        # Dark mode styling based on custom launcher availability
+        if has_custom_launcher:
+            card_border = "1px solid #3c4043"
+            card_background = "linear-gradient(145deg, #1a1f2e, #252a3a)"
+            card_shadow = "0 2px 8px rgba(0,0,0,0.3)"
+        else:
+            # Red highlighting for missing launcher
+            card_border = "2px solid #f44336"
+            card_background = "linear-gradient(145deg, #2d1b1b, #3d2525)"
+            card_shadow = "0 2px 12px rgba(244,67,54,0.4)"
+
+        return f"""
+        <div class="project-card" id="{card_id}" style="
+            border: {card_border}; 
+            border-radius: 12px; 
+            padding: 16px; 
+            margin: 8px;
+            background: {card_background};
+            box-shadow: {card_shadow};
+            transition: all 0.2s ease;
+            position: relative;
+        ">
+            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <img src="{project.get('icon_data', '')}" style="
+                    width: 64px; height: 64px; 
+                    border-radius: 8px; 
+                    border: 2px solid #e0e0e0;
+                    flex-shrink: 0;
+                " />
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                        <h3 style="margin: 0; font-size: 16px; color: #e8eaed; font-weight: 600; flex: 1;">
+                            {str(project.get('name', 'Unknown Project'))}
+                        </h3>
+                        <div style="display: flex; gap: 6px; margin-left: 12px;">
+                            <button onclick="toggleFavorite('{project_path_safe}')" style="
+                                background: {'#ff9800' if is_favorite else '#5f6368'};
+                                color: {'#0f1419' if is_favorite else '#e8eaed'}; 
+                                border: 1px solid {'#ff9800' if is_favorite else '#3c4043'}; 
+                                padding: 6px 10px; 
+                                border-radius: 8px; 
+                                cursor: pointer; 
+                                font-size: 12px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                                min-width: 32px;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'"
+                               title="{'Remove from favorites' if is_favorite else 'Add to favorites'}">
+                                ⭐
+                            </button>
+                            <button onclick="toggleHidden('{project_path_safe}')" style="
+                                background: {'#f44336' if is_hidden else '#5f6368'};
+                                color: {'#e8eaed' if is_hidden else '#e8eaed'}; 
+                                border: 1px solid {'#f44336' if is_hidden else '#3c4043'}; 
+                                padding: 6px 10px; 
+                                border-radius: 8px; 
+                                cursor: pointer; 
+                                font-size: 12px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                                min-width: 32px;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'"
+                               title="{'Show project' if is_hidden else 'Hide project'}">
+                                👻
+                            </button>
+                            <button onclick="launchProject({index}, '{escaped_name}', '{escaped_path}')" 
+                               style="
+                                background: linear-gradient(135deg, #64b5f6, #42a5f5);
+                                color: #0f1419; 
+                                border: 1px solid #64b5f6; 
+                                padding: 6px 12px; 
+                                border-radius: 8px; 
+                                cursor: pointer; 
+                                font-size: 11px;
+                                font-weight: 600;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                                transition: all 0.2s ease;
+                                text-decoration: none;
+                                display: inline-block;
+                            " onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(100,181,246,0.4)'"
+                               onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.3)'">
+                                🚀 Launch
+                            </button>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        {' '.join(status_badges)}
+                    </div>
+                    <div style="
+                        font-size: 12px; color: #e8eaed; margin: 0 0 8px 0; 
+                        line-height: 1.4;
+                    ">
+                        {self._create_expandable_description(description)}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #5f6368;">
+                        <span>🐍 {env_type} • 📝 {main_script}</span>
+                        <span>Last: {time_str}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """
+    
+    def create_projects_grid(self, projects: List[Dict], api_port: int = 7871) -> str:
+        """Create responsive grid of project cards with favorites and hidden sections"""
+        if not projects:
+            return """
+            <div style="text-align: center; padding: 40px; color: #9aa0a6;">
+                <h3 style="color: #e8eaed;">No projects found</h3>
+                <p>The background scanner will automatically discover projects in your configured directories.</p>
+            </div>
+            """
+        
+        # Separate projects into categories
+        favorites = []
+        visible = []
+        hidden = []
+        
+        for i, project in enumerate(projects):
+            if project.get('is_favorite', False):
+                favorites.append((project, i))
+            elif project.get('is_hidden', False):
+                hidden.append((project, i))
+            else:
+                visible.append((project, i))
+        
+        grid_html = ""
+        
+        # Favorites section (shown only if there are favorites)
+        if favorites:
+            grid_html += """
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: #ff9800; margin: 0 0 12px 16px; font-size: 18px; font-weight: 600; display: flex; align-items: center;">
+                    ⭐ Favorites
+                </h3>
+                <div style="
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                    gap: 16px; 
+                    padding: 0 16px;
+                    border-left: 4px solid #ff9800;
+                    margin-left: 16px;
+                    padding-left: 20px;
+                ">
+            """
+            
+            for project, index in favorites:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += "</div></div>"
+        
+        # Regular projects section
+        if visible:
+            section_title = "All Projects" if not favorites else "Projects"
+            grid_html += f"""
+            <div style="margin-bottom: 20px;">
+                <h3 style="color: #e8eaed; margin: 0 0 12px 16px; font-size: 18px; font-weight: 600;">
+                    📋 {section_title}
+                </h3>
+                <div style="
+                    display: grid; 
+                    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                    gap: 16px; 
+                    padding: 0 16px;
+                ">
+            """
+            
+            for project, index in visible:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += "</div></div>"
+        
+        # Hidden projects section (expandable, shown only if there are hidden projects)
+        if hidden:
+            grid_html += f"""
+            <div style="margin-top: 20px;">
+                <div style="margin: 0 16px;">
+                    <button onclick="toggleHiddenSection()" style="
+                        background: #5f6368;
+                        color: #e8eaed;
+                        border: 1px solid #3c4043;
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 14px;
+                        font-weight: 600;
+                        margin-bottom: 12px;
+                        transition: all 0.2s ease;
+                    " onmouseover="this.style.background='#2d3448'; this.style.borderColor='#5f6368'"
+                       onmouseout="this.style.background='#5f6368'; this.style.borderColor='#3c4043'">
+                        👻 Hidden Projects ({len(hidden)}) <span id="hidden-toggle-arrow">▼</span>
+                    </button>
+                </div>
+                <div id="hidden-projects-section" style="
+                    display: none;
+                    border-left: 4px solid #5f6368;
+                    margin-left: 16px;
+                    padding-left: 20px;
+                ">
+                    <div style="
+                        display: grid; 
+                        grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); 
+                        gap: 16px; 
+                        padding: 0 16px;
+                    ">
+            """
+            
+            for project, index in hidden:
+                grid_html += self.create_project_card(project, index, api_port)
+            
+            grid_html += """
+                    </div>
+                </div>
+            </div>
+            """
+        
+        # Add JavaScript for hidden section toggle and favorite/hidden buttons
+        grid_html += f"""
+        <script>
+        // Make API port available to JavaScript functions
+        const api_port = {api_port};
+        
+        function toggleHiddenSection() {{
+            const section = document.getElementById('hidden-projects-section');
+            const arrow = document.getElementById('hidden-toggle-arrow');
+            
+            if (section.style.display === 'none') {{
+                section.style.display = 'block';
+                arrow.textContent = '▲';
+            }} else {{
+                section.style.display = 'none';
+                arrow.textContent = '▼';
+            }}
+        }}
+        
+        function toggleFavorite(projectPath) {{
+            console.log('🌟 [JS] Toggle favorite for:', projectPath);
+            
+            // Use the reusable API function
+            callAPI('/api/toggle-favorite', 'POST', {{ project_path: projectPath }})
+                .then(data => {{
+                    console.log('🌟 [JS] Successfully toggled favorite');
+                }})
+                .catch(error => {{
+                    console.error('🌟 [JS] Failed to toggle favorite:', error);
+                }});
+        }}
+        
+        function toggleHidden(projectPath) {{
+            console.log('👻 [JS] Toggle hidden for:', projectPath);
+            
+            // Use the reusable API function
+            callAPI('/api/toggle-hidden', 'POST', {{ project_path: projectPath }})
+                .then(data => {{
+                    console.log('👻 [JS] Successfully toggled hidden');
+                }})
+                .catch(error => {{
+                    console.error('👻 [JS] Failed to toggle hidden:', error);
+                }});
+        }}
+        
+        // Generic API call function - reusable for any endpoint
+        function callAPI(endpoint, method = 'GET', body = null, successCallback = null) {{
+            console.log(`🌐 [JS] API call to: ${{endpoint}}`);
+            
+            const options = {{
+                method: method,
+                headers: method === 'POST' ? {{ 'Content-Type': 'application/json' }} : {{}}
+            }};
+            
+            if (body && method === 'POST') {{
+                options.body = JSON.stringify(body);
+            }}
+            
+            return fetch(`http://localhost:${{api_port}}${{endpoint}}`, options)
+                .then(response => response.json())
+                .then(data => {{
+                    console.log(`🌐 [JS] API response for ${{endpoint}}:`, data);
+                    if (data.success) {{
+                        if (successCallback) successCallback(data);
+                        // Always refresh projects after successful API calls
+                        if (window.refreshProjects) {{
+                            window.refreshProjects();
+                        }}
+                        return data;
+                    }} else {{
+                        console.error(`API call failed for ${{endpoint}}:`, data.error);
+                        throw new Error(data.error || 'API call failed');
+                    }}
+                }})
+                .catch(error => {{
+                    console.error(`Error calling ${{endpoint}}:`, error);
+                    throw error;
+                }});
+        }}
+        
+        function launchProject(projectIndex, projectName, projectPath) {{
+            console.log('🚀 [JS] Launch request:', projectIndex, projectName, 'at', projectPath);
+            
+            // Use the simple API pattern like favorite/hidden buttons
+            callAPI(`/launch?project_id=${{projectIndex}}`, 'GET')
+                .then(data => {{
+                    console.log('🚀 [JS] Launch successful:', data.message);
+                }})
+                .catch(error => {{
+                    console.error('🚀 [JS] Launch failed:', error);
+                }});
+        }}
+        
+        // Make functions globally available
+        window.toggleHiddenSection = toggleHiddenSection;
+        window.toggleFavorite = toggleFavorite;
+        window.toggleHidden = toggleHidden;
+        window.launchProject = launchProject;
+        window.callAPI = callAPI;
+        </script>
+        """
+        
+        return grid_html
+    
     def build_app_list_tab(self, api_port: int):
         """Build the app list tab with existing functionality"""
-        # Initialize the persistent launcher
-        self.persistent_launcher.initialize()
+        # Initialize the launcher
+        self.initialize()
         
         # Get initial stats
         stats = db.get_stats()
@@ -93,7 +828,7 @@ class UnifiedLauncher:
                 color: var(--text-primary) !important;
                 border-color: var(--accent-red) !important;
             }
-            /* Project cards - will be styled in persistent_launcher.py */
+            /* Project cards - styled in main launcher */
             </style>
             """)
             
@@ -113,19 +848,19 @@ class UnifiedLauncher:
                         refresh_btn = gr.Button("♻️ Refresh", size="sm")
             
             # Projects display
-            projects_display = gr.HTML(self.persistent_launcher.create_projects_grid(self.persistent_launcher.current_projects, api_port))
+            projects_display = gr.HTML(self.create_projects_grid(self.current_projects, api_port))
             
             # Launch output
             with gr.Row():
                 launch_output = gr.Textbox(label="Launch Output", interactive=False)
                 project_details = gr.Markdown("Click on a project name to see details")
             
-            # Hidden components for instant launches
-            with gr.Row(visible=False):
-                instant_launch_input = gr.Textbox(elem_id="instant_launch_data")
-                project_name_input = gr.Textbox(elem_id="project_name_data")
-                project_path_input = gr.Textbox(elem_id="project_path_data")
-                launch_trigger = gr.Button("Launch", elem_id="launch_trigger")
+            # Hidden components for instant launches (styled hidden but DOM accessible)
+            with gr.Row(elem_classes="hidden-launch-controls"):
+                instant_launch_input = gr.Textbox(elem_id="instant_launch_data", container=False, show_label=False)
+                project_name_input = gr.Textbox(elem_id="project_name_data", container=False, show_label=False)
+                project_path_input = gr.Textbox(elem_id="project_path_data", container=False, show_label=False)
+                launch_trigger = gr.Button("Launch", elem_id="launch_trigger", size="sm")
                 
             # Hidden refresh button for JavaScript to trigger automatic refresh
             with gr.Row(visible=False):
@@ -133,49 +868,122 @@ class UnifiedLauncher:
             
             # Event handlers (simplified)
             def handle_search(query):
-                filtered_projects = []
-                if query.strip():
-                    query_lower = query.lower()
-                    for project in self.persistent_launcher.current_projects:
-                        if (query_lower in project.get('name', '').lower() or
-                            query_lower in project.get('description', '').lower() or
-                            query_lower in project.get('path', '').lower() or
-                            query_lower in project.get('environment_type', '').lower()):
-                            filtered_projects.append(project)
-                else:
-                    filtered_projects = self.persistent_launcher.current_projects
-                
-                return self.persistent_launcher.create_projects_grid(filtered_projects, api_port)
+                filtered_projects = self.filter_projects(query)
+                return self.create_projects_grid(filtered_projects, api_port)
             
             def handle_manual_scan():
                 try:
-                    scanner = get_scanner()
-                    scanner.start_initial_scan()
-                    self.persistent_launcher.load_projects()
+                    if self.scanner:
+                        self.scanner.trigger_scan()
+                    self.load_projects_from_db()
                     stats = db.get_stats()
                     status_md = f"**Status:** Scan Complete • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
-                    projects_html = self.persistent_launcher.create_projects_grid(self.persistent_launcher.current_projects, api_port)
+                    projects_html = self.create_projects_grid(self.current_projects, api_port)
                     return status_md, projects_html
                 except Exception as e:
                     return f"**Status:** Scan Error: {str(e)}", gr.update()
             
             def handle_refresh():
-                self.persistent_launcher.load_projects_from_db()
+                self.load_projects_from_db()
                 stats = db.get_stats()
                 status_md = f"**Status:** Refreshed • **Projects:** {stats['active_projects']} • **Pending Updates:** {stats['dirty_projects']}"
-                projects_html = self.persistent_launcher.create_projects_grid(self.persistent_launcher.current_projects, api_port)
+                projects_html = self.create_projects_grid(self.current_projects, api_port)
                 return status_md, projects_html
             
             def clear_search():
-                projects_html = self.persistent_launcher.create_projects_grid(self.persistent_launcher.current_projects, api_port)
+                projects_html = self.create_projects_grid(self.current_projects, api_port)
                 return "", projects_html
             
             def handle_launch(project_name, project_path):
+                """Launch a project using custom launcher or generate one if needed"""
                 try:
-                    result = self.persistent_launcher.launch_project_background(project_path, project_name)
-                    return result
+                    print(f"🚀 [UNIFIED] ===== SMART LAUNCH SYSTEM =====")
+                    print(f"🚀 [UNIFIED] Project: {project_name}")
+                    print(f"🚀 [UNIFIED] Path: {project_path}")
+                    
+                    # First, check if a custom launcher exists (highest priority)
+                    safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+                    custom_launcher_path = Path("custom_launchers") / f"{safe_name}.sh"
+                    
+                    if custom_launcher_path.exists():
+                        print(f"🚀 [UNIFIED] ✅ Found custom launcher: {custom_launcher_path}")
+                        print(f"🚀 [UNIFIED] Using custom launcher script for {project_name}")
+                        
+                        # Make sure it's executable
+                        import os
+                        try:
+                            os.chmod(custom_launcher_path, 0o755)
+                        except:
+                            pass  # Ignore permission errors
+                        
+                        # Execute the custom launcher directly
+                        cmd = f'cd "{project_path}" && echo "🚀 Using custom launcher: {custom_launcher_path}" && bash "{custom_launcher_path.absolute()}"'
+                        print(f"🚀 [UNIFIED] Custom launcher command: {cmd}")
+                        
+                        terminal_result = self.open_terminal(cmd)
+                        
+                        if "Terminal launched successfully!" in terminal_result:
+                            print(f"🚀 [UNIFIED] SUCCESS: Custom launcher executed")
+                            logger.launch_success(project_name)
+                            return f"✅ Launched {project_name} (Custom Launcher) - Terminal opened"
+                        else:
+                            print(f"🚀 [UNIFIED] ERROR: Failed to execute custom launcher")
+                            logger.launch_error(project_name, f"Custom launcher failed: {terminal_result}")
+                            return f"❌ Failed to start {project_name} with custom launcher: {terminal_result}"
+                    
+                    print(f"🚀 [UNIFIED] ❌ No custom launcher found, generating one...")
+                    print(f"🚀 [UNIFIED] Creating custom launcher for {project_name}...")
+                    
+                    # Generate a custom launcher using AI analysis
+                    try:
+                        from qwen_launch_analyzer import QwenLaunchAnalyzer
+                        analyzer = QwenLaunchAnalyzer()
+                        
+                        # Create custom launcher template with AI-generated command
+                        custom_launcher_path_str = analyzer.create_custom_launcher_template(
+                            project_path, project_name, ""  # Let it auto-detect the best command
+                        )
+                        
+                        if custom_launcher_path_str and Path(custom_launcher_path_str).exists():
+                            print(f"🚀 [UNIFIED] ✅ Generated custom launcher: {custom_launcher_path_str}")
+                            
+                            # Now execute the newly created custom launcher
+                            custom_launcher_path = Path(custom_launcher_path_str)
+                            
+                            # Make sure it's executable
+                            import os
+                            try:
+                                os.chmod(custom_launcher_path, 0o755)
+                            except:
+                                pass
+                            
+                            # Execute the newly created custom launcher
+                            cmd = f'cd "{project_path}" && echo "🚀 Using newly generated custom launcher: {custom_launcher_path.name}" && bash "{custom_launcher_path.absolute()}"'
+                            print(f"🚀 [UNIFIED] Generated launcher command: {cmd}")
+                            
+                            terminal_result = self.open_terminal(cmd)
+                            
+                            if "Terminal launched successfully!" in terminal_result:
+                                print(f"🚀 [UNIFIED] SUCCESS: Generated custom launcher executed")
+                                logger.launch_success(project_name)
+                                return f"✅ Launched {project_name} (Generated Custom Launcher) - Terminal opened"
+                            else:
+                                print(f"🚀 [UNIFIED] ERROR: Failed to execute generated custom launcher")
+                                logger.launch_error(project_name, f"Generated custom launcher failed: {terminal_result}")
+                                return f"❌ Failed to start {project_name} with generated custom launcher: {terminal_result}"
+                        else:
+                            print(f"🚀 [UNIFIED] ❌ Failed to generate custom launcher")
+                            return f"❌ Failed to generate custom launcher for {project_name}"
+                            
+                    except Exception as e:
+                        print(f"🚀 [UNIFIED] ❌ Error generating custom launcher: {str(e)}")
+                        return f"❌ Error generating custom launcher for {project_name}: {str(e)}"
+                        
                 except Exception as e:
-                    return f"❌ Launch error: {str(e)}"
+                    error_msg = str(e)
+                    print(f"🚀 [UNIFIED] EXCEPTION: {error_msg}")
+                    logger.launch_error(project_name, error_msg)
+                    return f"❌ Error launching project: {error_msg}"
             
             # Note: Search events are wired up in the main function scope
             
@@ -212,6 +1020,35 @@ class UnifiedLauncher:
             # Return projects_display so it can be accessed by global search handlers
             return projects_display
 
+def load_config():
+    """Load configuration from config.json"""
+    with open('config.json', 'r') as f:
+        return json.load(f)
+
+def find_available_port(start_port=7870, end_port=7890, exclude_ports=None):
+    """Find an available port in the specified range, excluding certain ports"""
+    
+    if exclude_ports is None:
+        exclude_ports = []
+    
+    print(f"🚀 [UNIFIED] Searching for available port in range {start_port}-{end_port}, excluding {exclude_ports}")
+    
+    for port in range(start_port, end_port + 1):
+        if port in exclude_ports:
+            print(f"🚀 [UNIFIED] Port {port} excluded, skipping...")
+            continue
+            
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', port))
+                print(f"🚀 [UNIFIED] Found available port: {port}")
+                return port
+        except OSError:
+            print(f"🚀 [UNIFIED] Port {port} is in use, trying next...")
+    
+    print(f"🚀 [UNIFIED] No available ports found in range {start_port}-{end_port}")
+    return None
+
 def main():
     """Main application entry point with argument parsing"""
     parser = argparse.ArgumentParser(description="Unified AI Project Launcher")
@@ -239,7 +1076,7 @@ def main():
         print(f"❌ Error loading config: {e}")
         sys.exit(1)
     
-    # Create unified launcher
+    # Create main launcher
     launcher = UnifiedLauncher(config, verbose=args.verbose)
     
     if args.verbose:
@@ -254,7 +1091,7 @@ def main():
         try:
             if args.verbose:
                 print(f"🚀 [VERBOSE] Starting Launch API Server on port {args.api_port}...")
-            api_server_thread = start_api_server(port=args.api_port, launcher=launcher.persistent_launcher)
+            api_server_thread = start_api_server(port=args.api_port, launcher=launcher)
             if args.verbose:
                 print(f"🚀 [VERBOSE] Launch API Server started successfully")
         except Exception as e:
@@ -490,6 +1327,28 @@ def main():
             margin: 0 0 12px 0 !important;
         }
         
+        /* Hidden launch controls - present in DOM but invisible to users */
+        .hidden-launch-controls {
+            position: absolute !important;
+            top: -9999px !important;
+            left: -9999px !important;
+            width: 1px !important;
+            height: 1px !important;
+            overflow: hidden !important;
+            opacity: 0 !important;
+            visibility: hidden !important;
+            z-index: -1 !important;
+        }
+        
+        /* Keep child elements accessible to JavaScript but invisible */
+        .hidden-launch-controls input,
+        .hidden-launch-controls textarea,
+        .hidden-launch-controls button {
+            visibility: hidden !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
         /* Mobile responsiveness */
         @media (max-width: 768px) {
             .nav-container {
@@ -574,7 +1433,7 @@ def main():
                     projects_display = None
             
             with gr.Column(visible=False) as database_content:
-                build_database_ui(launcher=launcher.persistent_launcher)
+                build_database_ui(launcher=launcher)
             
             # Settings tab content
             with gr.Column(visible=(default_tab == "settings")) as settings_content:
@@ -729,14 +1588,14 @@ def main():
         # Wire up fixed search bar events
         def handle_fixed_search(query):
             """Handle search from the fixed search bar"""
-            if hasattr(launcher, 'persistent_launcher') and hasattr(launcher.persistent_launcher, 'filter_projects'):
-                filtered_projects = launcher.persistent_launcher.filter_projects(query)
-                return launcher.persistent_launcher.create_projects_grid(filtered_projects, args.api_port)
-            return launcher.persistent_launcher.create_projects_grid(launcher.persistent_launcher.current_projects, args.api_port)
+            if hasattr(launcher, 'filter_projects'):
+                filtered_projects = launcher.filter_projects(query)
+                return launcher.create_projects_grid(filtered_projects, args.api_port)
+            return launcher.create_projects_grid(launcher.current_projects, args.api_port)
         
         def clear_fixed_search():
             """Clear the fixed search bar"""
-            return "", launcher.persistent_launcher.create_projects_grid(launcher.persistent_launcher.current_projects, args.api_port)
+            return "", launcher.create_projects_grid(launcher.current_projects, args.api_port)
         
         fixed_search_input.change(
             handle_fixed_search,
@@ -756,7 +1615,7 @@ def main():
             outputs=[],
             js=f"""
             function() {{
-                console.log('🚀 Unified Launcher URL Router: Initializing...');
+                console.log('🚀 Launcher URL Router: Initializing...');
                 
                 // Make API port available globally first
                 window.api_port = {args.api_port};
@@ -963,28 +1822,97 @@ def main():
                     }}
                 }};
                 
-                window.launchProject = function(projectName, projectPath) {{
-                    console.log('🚀 [JS] Launch request:', projectName, 'at', projectPath);
+                window.launchProject = function(projectIndex, projectName, projectPath) {{
+                    console.log('🚀 [JS] Launch request:', projectIndex, projectName, 'at', projectPath);
                     
-                    // Set hidden inputs
-                    const nameInput = document.querySelector('#project_name_data input');
-                    const pathInput = document.querySelector('#project_path_data input');
-                    const launchBtn = document.querySelector('#launch_trigger');
-                    
-                    if (nameInput && pathInput && launchBtn) {{
-                        nameInput.value = projectName;
-                        nameInput.dispatchEvent(new Event('input'));
-                        
-                        pathInput.value = projectPath;
-                        pathInput.dispatchEvent(new Event('input'));
-                        
-                        // Trigger launch after a short delay
-                        setTimeout(() => {{
-                            launchBtn.click();
-                        }}, 100);
-                    }} else {{
-                        console.error('🚀 [JS] Could not find required elements');
+                    // Method 1: Try direct API call (preferred)
+                    if (window.api_port && projectIndex !== undefined) {{
+                        console.log('🚀 [JS] Using direct API call method');
+                        fetch(`http://localhost:${{window.api_port}}/launch?project_id=${{projectIndex}}`, {{
+                            method: 'GET'
+                        }})
+                        .then(response => response.json())
+                        .then(data => {{
+                            console.log('🚀 [JS] API launch response:', data);
+                            if (data.success) {{
+                                console.log('✅ [JS] Launch successful:', data.message);
+                            }} else {{
+                                console.error('❌ [JS] Launch failed:', data.error);
+                            }}
+                        }})
+                        .catch(error => {{
+                            console.error('❌ [JS] Error calling launch API:', error);
+                            // Fallback to Gradio method if API fails
+                            fallbackToGradio();
+                        }});
+                        return;
                     }}
+                    
+                    // Method 2: Fallback to Gradio components
+                    function fallbackToGradio() {{
+                        console.log('🚀 [JS] Using Gradio fallback method');
+                        
+                        // Try multiple selector strategies for hidden Gradio inputs
+                        let nameInput = document.querySelector('#project_name_data input') || 
+                                       document.querySelector('#project_name_data textarea') ||
+                                       document.querySelector('[id*="project_name_data"] input') ||
+                                       document.querySelector('[id*="project_name_data"] textarea');
+                        
+                        let pathInput = document.querySelector('#project_path_data input') || 
+                                       document.querySelector('#project_path_data textarea') ||
+                                       document.querySelector('[id*="project_path_data"] input') ||
+                                       document.querySelector('[id*="project_path_data"] textarea');
+                        
+                        let launchBtn = document.querySelector('#launch_trigger') ||
+                                       document.querySelector('[id*="launch_trigger"]') ||
+                                       document.querySelector('button[id*="launch_trigger"]');
+                        
+                        console.log('🚀 [JS] Gradio element search results:', {{
+                            nameInput: nameInput ? 'found' : 'missing',
+                            pathInput: pathInput ? 'found' : 'missing', 
+                            launchBtn: launchBtn ? 'found' : 'missing',
+                            nameInputId: nameInput ? nameInput.id : 'none',
+                            pathInputId: pathInput ? pathInput.id : 'none',
+                            launchBtnId: launchBtn ? launchBtn.id : 'none'
+                        }});
+                        
+                        if (nameInput && pathInput && launchBtn) {{
+                            console.log('🚀 [JS] Found all required elements, proceeding with Gradio launch...');
+                            
+                            // Set the hidden inputs
+                            nameInput.value = projectName;
+                            nameInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            nameInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            
+                            pathInput.value = projectPath;
+                            pathInput.dispatchEvent(new Event('input', {{bubbles: true}}));
+                            pathInput.dispatchEvent(new Event('change', {{bubbles: true}}));
+                            
+                            // Trigger launch after a short delay to ensure inputs are processed
+                            setTimeout(() => {{
+                                console.log('🚀 [JS] Triggering Gradio launch button...');
+                                launchBtn.click();
+                            }}, 200);
+                            
+                            console.log('✅ [JS] Gradio fallback initiated successfully');
+                        }} else {{
+                            console.error('🚀 [JS] Could not find required elements for Gradio fallback');
+                            console.log('🚀 [JS] Available inputs:', {{
+                                nameInput: nameInput ? 'found' : 'missing',
+                                pathInput: pathInput ? 'found' : 'missing', 
+                                launchBtn: launchBtn ? 'found' : 'missing'
+                            }});
+                            
+                            // Debug: List all elements that might be the hidden inputs
+                            console.log('🚀 [JS] All elements with "project", "launch", or "data" in ID:');
+                            document.querySelectorAll('[id*="project"], [id*="launch"], [id*="data"]').forEach(el => {{
+                                console.log('  -', el.tagName, el.id, el.type || 'no-type', el.style.display || 'default-display');
+                            }});
+                        }}
+                    }}
+                    
+                    // If no API port or project index, use Gradio fallback
+                    fallbackToGradio();
                 }};
                 
                 console.log('🌟 [JS] Global functions loaded via app.load():', {{

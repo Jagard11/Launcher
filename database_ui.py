@@ -344,7 +344,7 @@ Enter the full path to the project directory and click Re-analyze to update just
 ### ⚠️ Tools Unavailable
 
 The project management tools are not available in this interface. 
-Tools are only available when using the unified launcher.
+Tools are only available when using the main launcher.
 
 **Available Tools (when launcher is available):**
 - 🔄 Rebuild All Launch Commands
@@ -352,7 +352,7 @@ Tools are only available when using the unified launcher.
 - 🧹 Database Cleanup
 - 🏃 Mark All Projects Dirty
 
-**To access tools:** Use the unified launcher instead of the standalone database viewer.
+**To access tools:** Use the main launcher instead of the standalone database viewer.
                     """)
         
         # Subtab switching functions

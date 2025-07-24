@@ -45,8 +45,7 @@ A sophisticated Gradio-based application that automatically discovers, categoriz
 
 The application uses a modular architecture with clear separation of concerns:
 
-- **`unified_launcher.py`** - **NEW**: Main entry point with unified interface options
-- **`persistent_launcher.py`** - Primary launcher with full database integration and AI features
+- **`launcher.py`** - Main launcher with full database integration, AI features, and unified interface
 - **`qwen_launch_analyzer.py`** - **NEW**: AI-powered launch command generation using Qwen models
 - **`database_ui.py`** - **NEW**: Comprehensive database management interface
 - **`launch_api_server.py`** - **NEW**: RESTful API server for external integrations
@@ -120,11 +119,11 @@ pandas>=1.3.0
    
    Or choose your interface:
    ```bash
-   python3 unified_launcher.py                    # Default: Persistent launcher
-   python3 unified_launcher.py --mode database    # Database management UI
-   python3 unified_launcher.py --mode api         # API server only
-   python3 unified_launcher.py --verbose          # Verbose logging
-   ```
+python3 launcher.py                    # Default: Main launcher
+python3 launcher.py --mode database    # Database management UI
+python3 launcher.py --mode api         # API server only
+python3 launcher.py --verbose          # Verbose logging
+```
 
 5. **Access the Interface**
    - **Persistent Launcher**: http://localhost:7862
@@ -202,7 +201,7 @@ The system automatically uses available models:
 ### API Server
 ```bash
 # Start API server
-python3 unified_launcher.py --mode api
+python3 launcher.py --mode api
 
 # Example API calls
 curl http://localhost:7864/api/projects                    # List all projects
@@ -284,8 +283,7 @@ sqlite3 projects.db "SELECT name, launch_analysis_method, launch_confidence FROM
 
 ```
 ai-launcher/
-├── unified_launcher.py           # NEW: Main unified entry point
-├── persistent_launcher.py        # Primary launcher with full AI features
+├── launcher.py                   # Main launcher with full AI features and unified interface
 ├── qwen_launch_analyzer.py       # NEW: AI launch command generation
 ├── database_ui.py               # NEW: Database management interface
 ├── launch_api_server.py          # NEW: RESTful API server
@@ -345,7 +343,7 @@ The launcher automatically:
 
 ## 🚀 Interface Comparison
 
-| Feature | Legacy (`app.py`) | Enhanced (`enhanced_launcher.py`) | **Persistent (`persistent_launcher.py`)** | **Unified (`unified_launcher.py`)** |
+| Feature | Legacy (`app.py`) | Enhanced (`enhanced_launcher.py`) | **Main Launcher (`launcher.py`)** |
 |---------|------------------|-----------------------------------|-------------------------------------------|-------------------------------------|
 | AI Launch Commands | None | None | **Qwen-powered** | **Qwen-powered** |
 | Project Discovery | Manual scan | Manual/Auto scan | **Background + Manual** | **Background + Manual** |
@@ -386,7 +384,7 @@ The launcher automatically:
 Enable detailed logging:
 ```bash
 # Verbose logging
-python3 unified_launcher.py --verbose
+python3 launcher.py --verbose
 
 # View real-time logs
 tail -f logs/ai_launcher.log

@@ -47,19 +47,34 @@ class LaunchAPIServer:
                 print(f"🌐 [API] Request URL: {request.url}")
                 print(f"🌐 [API] Request args: {dict(request.args)}")
                 
-                # Get project_id from query parameter (for GET requests)
+                # Get project_id or project_path from query parameters
                 project_id = request.args.get('project_id')
+                project_path = request.args.get('project_path')
                 
-                if not project_id:
-                    print(f"🌐 [API] ❌ ERROR: No project_id provided!")
-                    return jsonify({"success": False, "error": "Missing project_id parameter"}), 400
-                
-                try:
-                    project_index = int(project_id)
-                    print(f"🌐 [API] ✅ Project ID: {project_index}")
-                except ValueError:
-                    print(f"🌐 [API] ❌ ERROR: Invalid project_id format: {project_id}")
-                    return jsonify({"success": False, "error": "Invalid project_id format"}), 400
+                if project_id:
+                    # Use project_id method (preferred)
+                    try:
+                        project_index = int(project_id)
+                        print(f"🌐 [API] ✅ Project ID: {project_index}")
+                    except ValueError:
+                        print(f"🌐 [API] ❌ ERROR: Invalid project_id format: {project_id}")
+                        return jsonify({"success": False, "error": "Invalid project_id format"}), 400
+                elif project_path:
+                    # Use project_path method (fallback for legacy compatibility)
+                    print(f"🌐 [API] 🔍 Looking up project by path: {project_path}")
+                    project_index = None
+                    for idx, project in enumerate(self.launcher.current_projects):
+                        if project.get('path') == project_path:
+                            project_index = idx
+                            print(f"🌐 [API] ✅ Found project at index {project_index}")
+                            break
+                    
+                    if project_index is None:
+                        print(f"🌐 [API] ❌ ERROR: Project not found with path: {project_path}")
+                        return jsonify({"success": False, "error": f"Project not found with path: {project_path}"}), 404
+                else:
+                    print(f"🌐 [API] ❌ ERROR: No project_id or project_path provided!")
+                    return jsonify({"success": False, "error": "Missing project_id or project_path parameter"}), 400
                 
                 # Get project data from launcher's current projects
                 print(f"🌐 [API] Looking up project by index {project_index}...")
@@ -128,12 +143,15 @@ class LaunchAPIServer:
                 thread.start()
                 print(f"🌐 [API] Background thread started successfully")
                 
+                # Check if we have detailed launch info from the background task
+                # For now, just indicate launch initiated
                 response_data = {
                     "success": True,
                     "message": f"Launch initiated for {project_name}",
                     "project_id": project_index,
                     "project_name": project_name,
-                    "request_time": request_time
+                    "request_time": request_time,
+                    "launch_method": "smart_launcher"  # Indicates we use custom launcher if available
                 }
                 print(f"🌐 [API] ✅ Sending success response: {response_data}")
                 logger.info(f"🌐 API response sent: {response_data}")
@@ -283,103 +301,91 @@ class LaunchAPIServer:
             return error_msg
     
     def execute_launch(self, project_path: str, project_name: str, launch_id: int = 0) -> str:
-        """Execute the project launch using AI-generated launch command"""
-        print(f"🌐 [API] ===== AI-POWERED LAUNCH =====")
+        """Execute the project launch using custom launcher or AI-generated command"""
+        print(f"🌐 [API] ===== SMART LAUNCH SYSTEM =====")
         print(f"🌐 [API] Project: {project_name}")
         print(f"🌐 [API] Path: {project_path}")
         
         try:
-            print(f"🌐 [API] Step 1: Getting project from database...")
-            # Get project data from database to access AI-generated launch command
-            project_data = db.get_project_by_path(project_path)
+            print(f"🌐 [API] Step 1: Checking for custom launcher...")
+            # First, check if a custom launcher exists (highest priority)
+            safe_name = "".join(c for c in project_name if c.isalnum() or c in ('-', '_')).strip()
+            custom_launcher_path = Path("custom_launchers") / f"{safe_name}.sh"
             
-            if not project_data:
-                print(f"🌐 [API] Project not found in database, using fallback...")
-                return self._fallback_launch(project_path, project_name)
-            
-            # Get AI-generated launch information
-            launch_command = project_data.get('launch_command')
-            launch_type = project_data.get('launch_type', 'unknown')
-            working_dir = project_data.get('launch_working_directory', '.')
-            launch_args = project_data.get('launch_args', '')
-            confidence = project_data.get('launch_confidence', 0.0)
-            analysis_method = project_data.get('launch_analysis_method', 'unknown')
-            
-            print(f"🌐 [API] AI Analysis Method: {analysis_method}")
-            print(f"🌐 [API] Launch Type: {launch_type}")
-            print(f"🌐 [API] Confidence: {confidence:.2f}")
-            print(f"🌐 [API] AI Command: {launch_command}")
-            
-            if not launch_command or confidence < 0.3:
-                print(f"🌐 [API] Low confidence or missing AI command, using fallback...")
-                return self._fallback_launch(project_path, project_name)
-            
-            print(f"🌐 [API] Step 2: Detecting environment...")
-            env_info = self.env_detector.detect_environment(project_path)
-            
-            logger.launch_attempt(project_name, project_path, env_info['type'])
-            
-            print(f"🌐 [API] Step 3: Building environment-aware command...")
-            
-            # Combine working directory with project path
-            if working_dir == '.' or not working_dir:
-                full_working_dir = project_path
-            else:
-                full_working_dir = str(Path(project_path) / working_dir)
-            
-            project_path_quoted = f'"{full_working_dir}"'
-            
-            # Add launch arguments if any
-            full_command = launch_command
-            if launch_args:
-                full_command += f" {launch_args}"
-            
-            print(f"🌐 [API] Working Directory: {full_working_dir}")
-            print(f"🌐 [API] Base Command: {full_command}")
-            print(f"🌐 [API] Environment type: {env_info['type']}")
-            
-            # Build environment-specific terminal command
-            if env_info['type'] == 'conda':
-                env_name = env_info.get('name', 'base')
-                cmd = f'cd {project_path_quoted} && echo "🚀 Activating conda environment: {env_name}" && conda activate {env_name} && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Conda environment: {env_name}")
-            elif env_info['type'] == 'venv':
-                activate_path = env_info.get('activate_path', '')
-                activate_path_quoted = f'"{activate_path}"'
-                cmd = f'cd {project_path_quoted} && echo "🚀 Activating virtual environment" && source {activate_path_quoted} && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Virtual env activation: {activate_path}")
-            elif env_info['type'] == 'poetry':
-                cmd = f'cd {project_path_quoted} && echo "🚀 Using Poetry environment" && echo "🚀 Running: poetry run {full_command}" && poetry run {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Using Poetry environment")
-            elif env_info['type'] == 'pipenv':
-                cmd = f'cd {project_path_quoted} && echo "🚀 Using Pipenv environment" && echo "🚀 Running: pipenv run {full_command}" && pipenv run {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Using Pipenv environment")
-            elif launch_type == 'docker':
-                # For docker commands, run them directly without Python environment
-                cmd = f'cd {project_path_quoted} && echo "🚀 Running Docker command" && echo "🚀 Command: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Using Docker")
-            else:
-                # Default: run with system Python or as-is for non-Python commands
-                if full_command.startswith('python'):
-                    cmd = f'cd {project_path_quoted} && echo "🚀 Using system Python" && echo "🚀 Running: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
+            if custom_launcher_path.exists():
+                print(f"🌐 [API] ✅ Found custom launcher: {custom_launcher_path}")
+                print(f"🌐 [API] Using custom launcher script for {project_name}")
+                
+                # Make sure it's executable
+                import os
+                try:
+                    os.chmod(custom_launcher_path, 0o755)
+                except:
+                    pass  # Ignore permission errors
+                
+                # Execute the custom launcher directly
+                cmd = f'cd "{project_path}" && echo "🚀 Using custom launcher: {custom_launcher_path}" && bash "{custom_launcher_path.absolute()}"'
+                print(f"🌐 [API] Custom launcher command: {cmd}")
+                
+                terminal_result = self.open_terminal(cmd)
+                
+                if "Terminal launched successfully!" in terminal_result:
+                    print(f"🌐 [API] SUCCESS: Custom launcher executed")
+                    logger.launch_success(project_name)
+                    return f"✅ Custom-Launched {project_name} using {custom_launcher_path.name} - Terminal opened"
                 else:
-                    cmd = f'cd {project_path_quoted} && echo "🚀 Running custom command" && echo "🚀 Command: {full_command}" && {full_command}; echo "\\n📋 Press Enter to close..."; read'
-                print(f"🌐 [API] Using system environment")
+                    print(f"🌐 [API] ERROR: Failed to execute custom launcher")
+                    logger.launch_error(project_name, f"Custom launcher failed: {terminal_result}")
+                    return f"❌ Failed to start {project_name} with custom launcher: {terminal_result}"
             
-            print(f"🌐 [API] Step 4: Executing AI-generated command...")
-            print(f"🌐 [API] Final Command: {cmd[:200]}...")
+            print(f"🌐 [API] ❌ No custom launcher found, generating one...")
+            print(f"🌐 [API] Step 2: Creating custom launcher for {project_name}...")
             
-            # Use the cross-platform terminal opening function
-            terminal_result = self.open_terminal(cmd)
-            
-            if "Terminal launched successfully!" in terminal_result:
-                print(f"🌐 [API] SUCCESS: AI-launched terminal opened")
-                logger.launch_success(project_name)
-                return f"✅ AI-Launched {project_name} ({launch_type}, confidence: {confidence:.1f}) - Terminal opened"
-            else:
-                print(f"🌐 [API] ERROR: Failed to open terminal")
-                logger.launch_error(project_name, f"AI launch failed: {terminal_result}")
-                return f"❌ Failed to start {project_name}: {terminal_result}"
+            # Generate a custom launcher using AI analysis
+            try:
+                from qwen_launch_analyzer import QwenLaunchAnalyzer
+                analyzer = QwenLaunchAnalyzer()
+                
+                # Create custom launcher template with AI-generated command
+                custom_launcher_path_str = analyzer.create_custom_launcher_template(
+                    project_path, project_name, ""  # Let it auto-detect the best command
+                )
+                
+                if custom_launcher_path_str and Path(custom_launcher_path_str).exists():
+                    print(f"🌐 [API] ✅ Generated custom launcher: {custom_launcher_path_str}")
+                    
+                    # Now execute the newly created custom launcher
+                    custom_launcher_path = Path(custom_launcher_path_str)
+                    
+                    # Make sure it's executable
+                    import os
+                    try:
+                        os.chmod(custom_launcher_path, 0o755)
+                    except:
+                        pass
+                    
+                    # Execute the newly created custom launcher
+                    cmd = f'cd "{project_path}" && echo "🚀 Using newly generated custom launcher: {custom_launcher_path.name}" && bash "{custom_launcher_path.absolute()}"'
+                    print(f"🌐 [API] Generated launcher command: {cmd}")
+                    
+                    terminal_result = self.open_terminal(cmd)
+                    
+                    if "Terminal launched successfully!" in terminal_result:
+                        print(f"🌐 [API] SUCCESS: Generated custom launcher executed")
+                        logger.launch_success(project_name)
+                        return f"✅ Custom-Launched {project_name} using newly generated {custom_launcher_path.name} - Terminal opened"
+                    else:
+                        print(f"🌐 [API] ERROR: Failed to execute generated custom launcher")
+                        logger.launch_error(project_name, f"Generated custom launcher failed: {terminal_result}")
+                        return f"❌ Failed to start {project_name} with generated custom launcher: {terminal_result}"
+                else:
+                    print(f"🌐 [API] ❌ Failed to generate custom launcher")
+                    return f"❌ Failed to generate custom launcher for {project_name}"
+                    
+            except Exception as e:
+                print(f"🌐 [API] ❌ Error generating custom launcher: {str(e)}")
+                return f"❌ Error generating custom launcher for {project_name}: {str(e)}"
+
             
         except Exception as e:
             error_msg = str(e)
